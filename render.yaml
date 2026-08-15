@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: room2store-perception
+    runtime: node
+    plan: free
+    branch: feat/photo-identification
+    buildCommand: npm install
+    startCommand: node services/perception/src/server.mjs
+    healthCheckPath: /health
+    envVars:
+      # Set every value in the Render dashboard. sync:false keeps them out of git.
+      - key: LINQ_API_KEY
+        sync: false
+      - key: LINQ_WEBHOOK_SECRET
+        sync: false
+      - key: LINQ_PHONE_NUMBER
+        sync: false
+      - key: PIONEER_API_KEY
+        sync: false

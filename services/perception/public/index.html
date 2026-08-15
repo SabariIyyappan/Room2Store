@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Room2Store · Identify an item</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">ROOM2STORE / SELL ONE ITEM</p>
+      <h1>Take a picture.<br />We’ll find the product.</h1>
+      <p class="intro">If we are not confident about the exact model, you choose from the likely matches before pricing starts.</p>
+
+      <section class="panel" aria-live="polite">
+        <div id="photo-step">
+          <label class="dropzone" for="photo-input">
+            <img id="preview" alt="Selected item" hidden />
+            <span id="upload-copy"><strong>Take or choose a photo</strong><small>Clear product photos work best</small></span>
+          </label>
+          <input id="photo-input" type="file" accept="image/*" capture="environment" />
+          <button id="identify-button" type="button" disabled>Identify item</button>
+        </div>
+
+        <div id="result-step" hidden>
+          <p id="source-notice" class="notice"></p>
+          <h2 id="result-title">Choose the best match</h2>
+          <div id="candidates" class="candidates"></div>
+          <label class="condition" id="name-field" hidden>Product name
+            <input id="product-name" type="text" autocomplete="off" />
+          </label>
+          <label class="condition" id="model-field" hidden>Model / part number (helps us price accurately)
+            <input id="model-number" type="text" autocomplete="off" placeholder="e.g. WH-1000XM5" />
+          </label>
+          <label class="condition">Condition
+            <select id="condition">
+              <option value="unknown">I’m not sure</option>
+              <option value="new">New / like new</option>
+              <option value="excellent">Excellent</option>
+              <option value="good">Good</option>
+              <option value="fair">Fair</option>
+            </select>
+          </label>
+          <button id="continue-button" type="button">Confirm and continue to pricing</button>
+        </div>
+
+        <div id="complete-step" hidden>
+          <p class="eyebrow">ITEM CONFIRMED</p>
+          <h2 id="item-name"></h2>
+          <p id="price-result"></p>
+          <p class="next">Next: compare market comps, then run the Terac pricing study.</p>
+          <button id="start-over" type="button" class="secondary">Identify another item</button>
+        </div>
+        <p id="error" class="error" role="alert"></p>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

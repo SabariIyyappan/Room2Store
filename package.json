@@ -1,0 +1,9 @@
+{
+  "name": "room2store",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:perception": "node --env-file-if-exists=.env services/perception/src/server.mjs",
+    "test": "node --test \"services/*/test/**/*.test.mjs\""
+  }
+}
