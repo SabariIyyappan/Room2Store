@@ -5,6 +5,7 @@
   "scripts": {
     "dev:perception": "node --env-file-if-exists=.env services/perception/src/server.mjs",
     "linq:subscribe": "node --env-file-if-exists=.env scripts/subscribe-webhook.mjs",
+    "linq:verify": "node --env-file-if-exists=.env scripts/verify-webhook.mjs",
     "test": "node --test \"services/*/test/**/*.test.mjs\""
   }
 }
