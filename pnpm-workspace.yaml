@@ -3,3 +3,5 @@ packages:
   - "services/*"
   - "apps/*"
   - "workflows"
+allowBuilds:
+  esbuild: true
