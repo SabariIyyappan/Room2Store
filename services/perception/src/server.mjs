@@ -377,7 +377,11 @@ const server = createServer(async (request, response) => {
       }
     }
 
-    if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { status: "ok" });
+    if (request.method === "GET" && url.pathname === "/health") {
+      // The backend is reported so a deploy can be checked for durable storage
+      // rather than the in-memory fallback, which loses listings on restart.
+      return json(response, 200, { status: "ok", store: storeBackend() });
+    }
     if (request.method === "GET") return serveFile(url.pathname, response);
     return json(response, 405, { error: "Method not allowed" });
   } catch (error) {

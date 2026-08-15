@@ -136,7 +136,7 @@ test("Linq webhook end to end", async (t) => {
   await t.test("boots and answers the health check", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { status: "ok" });
+    assert.deepEqual(await response.json(), { status: "ok", store: "memory" });
   });
 
   await t.test("rejects an unsigned payload", async () => {
