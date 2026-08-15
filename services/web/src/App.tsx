@@ -10,6 +10,8 @@ export default function App() {
       <Route path="/" element={<SellerUpload />} />
       <Route path="/dashboard/:campaignId/setup" element={<SetupFlow />} />
       <Route path="/dashboard/:campaignId" element={<Dashboard />} />
+      {/* Both forms resolve: the seller's text links to /store, judges may paste a slug. */}
+      <Route path="/store" element={<BuyerStorefront />} />
       <Route path="/store/:slug" element={<BuyerStorefront />} />
     </Routes>
   );
