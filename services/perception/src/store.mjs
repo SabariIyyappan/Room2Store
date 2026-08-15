@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS listings (
   id TEXT PRIMARY KEY,
   code TEXT UNIQUE NOT NULL,
   seller_id TEXT NOT NULL REFERENCES sellers(id) ON DELETE CASCADE,
+  seller_chat_id TEXT,
   name TEXT NOT NULL,
   category TEXT,
   model_number TEXT,
@@ -140,13 +141,13 @@ export async function insertListing(listing) {
 
   await pool.query(
     `INSERT INTO listings (
-       id, code, seller_id, name, category, model_number, condition, photo_url,
+       id, code, seller_id, seller_chat_id, name, category, model_number, condition, photo_url,
        price, floor_price, price_status, pickup_zip, pickup_city, pickup_state,
        pickup_latitude, pickup_longitude, status
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      ON CONFLICT (id) DO NOTHING`,
     [
-      listing.id, listing.code, listing.sellerId, listing.name, listing.category,
+      listing.id, listing.code, listing.sellerId, listing.sellerChatId, listing.name, listing.category,
       listing.modelNumber, listing.condition, listing.photoUrl, listing.price,
       listing.floorPrice, listing.priceStatus, listing.location.zip, listing.location.city,
       listing.location.state, listing.location.latitude, listing.location.longitude, listing.status
@@ -168,7 +169,9 @@ function rowToListing(row) {
     price: row.price == null ? null : Number(row.price),
     floorPrice: row.floorPrice == null ? null : Number(row.floorPrice),
     priceStatus: row.priceStatus,
+    studyId: row.studyId,
     status: row.status,
+    sellerChatId: row.sellerChatId,
     publishedAt: row.publishedAt,
     location: {
       zip: row.pickupZip,
@@ -183,7 +186,8 @@ function rowToListing(row) {
 const LISTING_COLUMNS = `
   id, code, seller_id AS "sellerId", name, category, model_number AS "modelNumber",
   condition, photo_url AS "photoUrl", price, floor_price AS "floorPrice",
-  price_status AS "priceStatus", status, published_at AS "publishedAt",
+  price_status AS "priceStatus", study_id AS "studyId", status,
+  seller_chat_id AS "sellerChatId", published_at AS "publishedAt",
   pickup_zip AS "pickupZip", pickup_city AS "pickupCity", pickup_state AS "pickupState",
   pickup_latitude AS "pickupLatitude", pickup_longitude AS "pickupLongitude"
 `;
@@ -211,6 +215,15 @@ export async function findListingByCode(code) {
   return rows[0] ? rowToListing(rows[0]) : null;
 }
 
+/** Finds the listing a Terac study belongs to. */
+export async function findListingByStudy(studyId) {
+  if (backend === "memory") {
+    return [...memory.listings.values()].find((listing) => listing.studyId === studyId) ?? null;
+  }
+  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings WHERE study_id = $1 LIMIT 1`, [studyId]);
+  return rows[0] ? rowToListing(rows[0]) : null;
+}
+
 export async function updateListing(id, changes) {
   if (backend === "memory") {
     const listing = memory.listings.get(id);
@@ -220,6 +233,7 @@ export async function updateListing(id, changes) {
   }
 
   const columns = {
+    sellerChatId: "seller_chat_id",
     price: "price",
     floorPrice: "floor_price",
     priceStatus: "price_status",

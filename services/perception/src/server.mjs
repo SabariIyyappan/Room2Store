@@ -24,8 +24,9 @@ import { recordItem, setCondition, setLocation, startTurn } from "./sessions.mjs
 import { DEFAULT_RADIUS_MILES, lookupZip } from "./geo.mjs";
 import { publishListing, queryListings, setMeasuredPrice } from "./listings.mjs";
 import { handleDealMessage } from "./deal-flow.mjs";
-import { initStore, markOrderPaid, findOrderById, findListingById, updateListing, storeBackend } from "./store.mjs";
+import { initStore, markOrderPaid, findOrderById, findListingById, findListingByStudy, updateListing, storeBackend } from "./store.mjs";
 import { isVerifiedStripeWebhook } from "./stripe.mjs";
+import { isVerifiedTeracWebhook, priceFromStudy } from "./terac.mjs";
 import { getDeal } from "./deals.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
@@ -175,6 +176,46 @@ async function notifyBothSidesPaid(order) {
   if (listing) await updateListing(listing.id, { status: "sold" });
 }
 
+
+/**
+ * Fits the study's answers into a price and tells the seller.
+ *
+ * Runs after the webhook has been acknowledged. A failure here leaves the
+ * listing unpriced, which is the correct outcome: an unmeasured price is worse
+ * than no price.
+ */
+async function priceListingFromStudy(listing, opportunityId) {
+  try {
+    const result = await priceFromStudy(opportunityId);
+    if (!result.ok) {
+      console.log(JSON.stringify({ event: "terac.not_enough_answers", listing: listing.id, sample: result.sampleSize }));
+      return;
+    }
+
+    const priced = await setMeasuredPrice(listing.id, result.recommendedPrice, {
+      floorPrice: result.floorPrice,
+      studyId: opportunityId
+    });
+    console.log(JSON.stringify({
+      event: "terac.priced",
+      listing: listing.id,
+      price: result.recommendedPrice,
+      floor: result.floorPrice,
+      sample: result.sampleSize
+    }));
+
+    if (listing.sellerChatId) {
+      await sendLinqReply({
+        chatId: listing.sellerChatId,
+        text: formatPriceMeasured({ ...priced, sampleSize: result.sampleSize }),
+        idempotencyKey: `terac-${listing.id}`
+      });
+    }
+  } catch (error) {
+    console.log(JSON.stringify({ event: "terac.pricing_failed", listing: listing.id, error: error.message }));
+  }
+}
+
 async function handleLinqWebhook(request, response) {
   const rawBody = await readRawBody(request);
   if (!isVerifiedLinqWebhook(request, rawBody)) return json(response, 401, { error: "Invalid Linq webhook signature." });
@@ -297,6 +338,45 @@ const server = createServer(async (request, response) => {
       items.delete(confirmation[1]);
       const verdict = reviewItem({ item });
       return json(response, 201, { item, verdict });
+    }
+
+    /**
+     * Links a Terac study to a listing, so the webhook knows which item the
+     * answers priced. Shared-token protected like the manual price endpoint.
+     */
+    const studyLink = url.pathname.match(/^\/api\/listings\/([^/]+)\/study$/);
+    if (request.method === "POST" && studyLink) {
+      const expected = process.env.PRICING_ADMIN_TOKEN;
+      if (!expected) return json(response, 503, { error: "PRICING_ADMIN_TOKEN is not configured." });
+      if (request.headers["x-pricing-token"] !== expected) return json(response, 401, { error: "Invalid pricing token." });
+
+      const body = await readJson(request);
+      if (!body.studyId) return json(response, 400, { error: "Send the Terac opportunity id as studyId." });
+
+      const listing = await updateListing(studyLink[1], { studyId: body.studyId });
+      if (!listing) return json(response, 404, { error: "No listing with that id." });
+      return json(response, 200, { listing });
+    }
+
+    /**
+     * Terac tells us a submission was approved. The payload carries only ids,
+     * so the answers are fetched and the curve fitted here.
+     */
+    if (request.method === "POST" && url.pathname === "/webhooks/terac") {
+      const rawBody = await readRawBody(request);
+      const verified = await isVerifiedTeracWebhook(request.headers, rawBody, process.env.TERAC_WEBHOOK_SECRET);
+      if (!verified) return json(response, 401, { error: "Invalid Terac signature." });
+
+      const event = JSON.parse(rawBody);
+      if (event.event_type !== "submission.approved") return json(response, 200, { status: "ignored" });
+
+      const listing = await findListingByStudy(event.opportunity_id);
+      if (!listing) return json(response, 200, { status: "no_listing_for_study" });
+
+      // Answering fast matters more than pricing before the response returns:
+      // a slow fit would make Terac time out and redeliver.
+      queueMicrotask(() => priceListingFromStudy(listing, event.opportunity_id));
+      return json(response, 200, { status: "pricing" });
     }
 
     /**

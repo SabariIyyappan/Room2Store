@@ -294,8 +294,9 @@ export function formatListingVetoed(item, verdict) {
 
 /** Sent to the seller once the pricing study has measured a real number. */
 export function formatPriceMeasured(listing) {
+  const panel = listing.sampleSize ? `${listing.sampleSize} people` : "real people";
   const lines = [
-    "Your price is in — measured on real people, not guessed.",
+    `Your price is in — measured on ${panel}, not guessed.`,
     "",
     listing.name,
     `Price: $${listing.price}`
