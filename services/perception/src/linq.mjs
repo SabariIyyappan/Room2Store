@@ -173,6 +173,98 @@ export function formatListingPublished(item, { webUrl } = {}) {
   return lines.join("\n");
 }
 
+/* ── Buyer and seller deal messages ──────────────────────────────────────── */
+
+export function formatItemForBuyer(listing) {
+  const lines = [
+    listing.name,
+    `Condition: ${listing.condition}`,
+    `Pickup: ${listing.location.city}, ${listing.location.state}`
+  ];
+
+  if (listing.price == null) {
+    lines.push("", "This one is still being priced. I will text you the moment it has a price.");
+  } else {
+    lines.push(`Asking: $${listing.price}`, "", "Reply with an offer, or say yes to take it at the asking price.");
+  }
+  return lines.join("\n");
+}
+
+export function formatCounterOffer(listing, counterOffer) {
+  return `I can do $${counterOffer} for the ${listing.name}.\n\nSay yes and I will set it up.`;
+}
+
+export function formatOfferRefused(listing, floorPrice) {
+  return [
+    `That is below what the seller will take for the ${listing.name}.`,
+    "",
+    `The lowest I can go is $${floorPrice}. Say yes and it is yours.`
+  ].join("\n");
+}
+
+export function formatCannotNegotiate(listing) {
+  return `The ${listing.name} has not been priced yet, so I cannot make a deal on it.\n\nI will text you as soon as it has a price.`;
+}
+
+/** Sent to the seller when a buyer has agreed a price. */
+export function formatSellerApproval(deal, amount) {
+  return [
+    "You have a buyer.",
+    "",
+    `${deal.listingName} — $${amount}`,
+    "",
+    "Reply YES to accept, or NO to pass."
+  ].join("\n");
+}
+
+export function formatAskPickupDetails(deal) {
+  return [
+    `Deal agreed at $${deal.agreedPrice}.`,
+    "",
+    "Send the pickup address and a time that works, in one message."
+  ].join("\n");
+}
+
+/** Sent to the buyer once the seller has accepted and given pickup details. */
+export function formatPaymentRequest(deal, paymentUrl) {
+  return [
+    `The seller accepted $${deal.agreedPrice} for the ${deal.listingName}.`,
+    "",
+    `Pickup: ${deal.pickupAddress}`,
+    `When: ${deal.pickupTime}`,
+    "",
+    "Pay here and it is yours:",
+    paymentUrl
+  ].join("\n");
+}
+
+export function formatBuyerPaid(deal) {
+  return [
+    `Paid — the ${deal.listingName} is yours.`,
+    "",
+    `Pickup: ${deal.pickupAddress}`,
+    `When: ${deal.pickupTime}`
+  ].join("\n");
+}
+
+export function formatSellerPaid(deal, sellerPayoutCents) {
+  return [
+    `Sold — $${deal.agreedPrice} for the ${deal.listingName}.`,
+    "",
+    `Your payout: $${(sellerPayoutCents / 100).toFixed(2)} after the 10% platform fee.`,
+    "",
+    `The buyer is collecting at ${deal.pickupTime}.`
+  ].join("\n");
+}
+
+export function formatSellerDeclined(deal) {
+  return `No problem — I told the buyer the ${deal.listingName} is not available at that price.`;
+}
+
+export function formatBuyerDeclined(deal) {
+  return `The seller passed on that price for the ${deal.listingName}.\n\nSend a higher offer if you would still like it.`;
+}
+
 const VETO_REASONS = {
   prohibited_weapon: "weapons cannot be listed",
   prohibited_car_seat: "used car seats and booster seats cannot be resold safely",
