@@ -11,6 +11,7 @@ import {
   formatIdentificationReply,
   formatListingPublished,
   formatLocationRejected,
+  formatPriceMeasured,
   formatLocationRequest,
   isOptOutEvent,
   PHOTO_FAILED,
@@ -18,7 +19,7 @@ import {
 } from "./linq.mjs";
 import { recordItem, setCondition, setLocation, startTurn } from "./sessions.mjs";
 import { DEFAULT_RADIUS_MILES, lookupZip } from "./geo.mjs";
-import { publishListing, queryListings } from "./listings.mjs";
+import { publishListing, queryListings, setMeasuredPrice } from "./listings.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -175,6 +176,8 @@ async function handleLinqWebhook(request, response) {
 
     const item = setLocation(inbound.chatId, location);
     if (item) {
+      // Remembered so the seller can be texted when the price is measured.
+      item.sellerChatId = inbound.chatId;
       await publishListing(item);
       await sendLinqReply({
         chatId: inbound.chatId,
@@ -234,6 +237,44 @@ const server = createServer(async (request, response) => {
       items.delete(confirmation[1]);
       const verdict = reviewItem({ item });
       return json(response, 201, { item, verdict });
+    }
+
+    /**
+     * Records a measured price from the pricing study.
+     *
+     * Terac is MCP-only, so nothing here calls it: whoever runs the study posts
+     * the result back. Shared-secret protected, because it sets the price money
+     * changes hands at.
+     */
+    const pricing = url.pathname.match(/^\/api\/listings\/([^/]+)\/price$/);
+    if (request.method === "POST" && pricing) {
+      const expected = process.env.PRICING_ADMIN_TOKEN;
+      if (!expected) return json(response, 503, { error: "PRICING_ADMIN_TOKEN is not configured." });
+      if (request.headers["x-pricing-token"] !== expected) return json(response, 401, { error: "Invalid pricing token." });
+
+      const body = await readJson(request);
+      const price = Number(body.price);
+      if (!Number.isFinite(price) || price <= 0) return json(response, 400, { error: "Send a positive numeric price." });
+
+      const listing = setMeasuredPrice(pricing[1], price, {
+        floorPrice: Number.isFinite(Number(body.floorPrice)) ? Number(body.floorPrice) : null,
+        studyId: body.studyId ?? null
+      });
+      if (!listing) return json(response, 404, { error: "No listing with that id." });
+
+      if (listing.sellerChatId) {
+        try {
+          await sendLinqReply({
+            chatId: listing.sellerChatId,
+            text: formatPriceMeasured(listing),
+            idempotencyKey: `price-${listing.id}`
+          });
+        } catch (error) {
+          console.log(JSON.stringify({ event: "linq.price_notice_failed", error: error.message }));
+        }
+      }
+
+      return json(response, 200, { listing });
     }
 
     // Buyer-facing listing search. No auth: these are public listings.

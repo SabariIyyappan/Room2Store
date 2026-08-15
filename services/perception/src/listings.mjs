@@ -21,6 +21,8 @@ export async function publishListing(item, { fetchImpl = fetch } = {}) {
 
   const listing = {
     id: item.id ?? crypto.randomUUID(),
+    // Kept so the seller can be texted the moment a price is measured.
+    sellerChatId: item.sellerChatId ?? null,
     name: item.name,
     condition: item.condition,
     modelNumber: item.modelNumber ?? null,
@@ -98,12 +100,19 @@ export function queryListings({ origin, radiusMiles = DEFAULT_RADIUS_MILES } = {
 }
 
 /** Attaches a measured price once the pricing study returns. */
-export function setMeasuredPrice(listingId, price) {
+export function setMeasuredPrice(listingId, price, { floorPrice = null, studyId = null } = {}) {
   const listing = published.get(listingId);
   if (!listing) return null;
   listing.price = price;
+  listing.floorPrice = floorPrice;
+  listing.studyId = studyId;
   listing.priceStatus = "measured";
+  listing.pricedAt = new Date().toISOString();
   return listing;
+}
+
+export function getListing(listingId) {
+  return published.get(listingId) ?? null;
 }
 
 /** Test seam. */

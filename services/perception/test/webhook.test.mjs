@@ -78,7 +78,8 @@ async function startService(stubPort) {
       LINQ_API_URL: `http://127.0.0.1:${stubPort}/v3`,
       PIONEER_API_KEY: "pio_sk_test",
       PIONEER_BASE_URL: `http://127.0.0.1:${stubPort}/v1`,
-      ZIP_API_URL: `http://127.0.0.1:${stubPort}/zip`
+      ZIP_API_URL: `http://127.0.0.1:${stubPort}/zip`,
+      PRICING_ADMIN_TOKEN: "test-pricing-token"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -216,6 +217,39 @@ test("Linq webhook end to end", async (t) => {
 
     const far = await fetch(`http://127.0.0.1:${port}/api/listings?zip=10001&radius=100`);
     assert.equal((await far.json()).listings.length, 0, "New York is far outside 100 miles");
+  });
+
+  await t.test("a measured price needs the shared token", async () => {
+    const { listings } = await (await fetch(`http://127.0.0.1:${port}/api/listings`)).json();
+    const id = listings[0].id;
+
+    const unauthorised = await fetch(`http://127.0.0.1:${port}/api/listings/${id}/price`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ price: 45 })
+    });
+    assert.equal(unauthorised.status, 401);
+  });
+
+  await t.test("posting a measured price prices the listing and texts the seller", async () => {
+    const { listings } = await (await fetch(`http://127.0.0.1:${port}/api/listings`)).json();
+    const id = listings[0].id;
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/listings/${id}/price`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-pricing-token": "test-pricing-token" },
+      body: JSON.stringify({ price: 145, floorPrice: 118, studyId: "study-1" })
+    });
+    assert.equal(response.status, 200);
+
+    const { listing } = await response.json();
+    assert.equal(listing.price, 145);
+    assert.equal(listing.priceStatus, "measured");
+
+    const notice = state.replies.at(-1);
+    assert.match(notice, /Your price is in/);
+    assert.match(notice, /Price: \$145/);
+    assert.match(notice, /not accept below \$118/);
   });
 
   await t.test("an unknown ZIP is rejected rather than guessed", async () => {

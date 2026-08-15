@@ -173,6 +173,19 @@ export function formatListingPublished(item, { webUrl } = {}) {
   return lines.join("\n");
 }
 
+/** Sent to the seller once the pricing study has measured a real number. */
+export function formatPriceMeasured(listing) {
+  const lines = [
+    "Your price is in — measured on real people, not guessed.",
+    "",
+    listing.name,
+    `Price: $${listing.price}`
+  ];
+  if (listing.floorPrice) lines.push(`I will not accept below $${listing.floorPrice}.`);
+  lines.push("", "It is live on Room2Store now.");
+  return lines.join("\n");
+}
+
 /** Sent when the ZIP could not be resolved. */
 export function formatLocationRejected(zip) {
   return `I could not find ZIP ${zip}. Send the five-digit ZIP code where the item can be picked up.`;
