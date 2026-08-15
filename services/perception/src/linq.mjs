@@ -26,28 +26,74 @@ export async function sendLinqReply({ chatId, text, idempotencyKey }) {
 
 const MAX_MEDIA_BYTES = 5_000_000;
 
-export function describeInboundLinqMessage(event) {
+const OPT_OUT = /^(STOP|UNSUBSCRIBE|OPTOUT|CANCEL|END|QUIT)$/i;
+const ASK_FOR_ITEMS = /^(1|OLD|ITEMS|MY ITEMS|OLD ITEMS|PRODUCTS|OLD PRODUCTS|HISTORY|STATUS)$/i;
+
+const WELCOME = "Welcome to Room2Store!\n\nSend a photo of anything you want to sell. No caption needed.\n\nAdd 'sell it for me' or any condition details, and I will take it from there.";
+const PHOTO_ACK = "Photo received.\n\nI am identifying the item and will prepare the next listing step shortly.";
+const RETURNING = "Reply 1 to check on the items you sent before.";
+const MID_SESSION = "Send a photo of the item and I will take it from there.";
+const NOTHING_YET = "You have not sent me any items yet.\n\nSend a photo of something you want to sell and I will identify it.";
+
+function inboundText(event) {
+  const parts = event?.data?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts.filter((part) => part.type === "text").map((part) => part.value).join(" ").trim();
+}
+
+/** Checked before a session is started, so an opt-out never refreshes one. */
+export function isOptOutEvent(event) {
+  return OPT_OUT.test(inboundText(event));
+}
+
+function formatItemList(items) {
+  const lines = items.map((item, index) => {
+    const price = item.naivePrice?.amount == null ? "pricing in progress" : `$${item.naivePrice.amount} provisional`;
+    const model = item.modelNumber && item.modelNumber !== "MODEL_UNKNOWN" ? ` (${item.modelNumber})` : "";
+    return `${index + 1}. ${item.name}${model} — ${price}`;
+  });
+
+  return `Here is what you have sent me so far:\n\n${lines.join("\n")}\n\nSend another photo to add one.`;
+}
+
+/**
+ * @param {object} event the message.received payload
+ * @param {object} [session] from startTurn(): whether this is a fresh
+ *   conversation, and what the chat has sent before
+ */
+export function describeInboundLinqMessage(event, session = { isNewSession: true, hasHistory: false, items: [] }) {
   if (event.event_type !== "message.received") return null;
 
   const parts = event.data?.parts;
   const chatId = event.data?.chat?.id;
   if (!chatId || !Array.isArray(parts)) return null;
 
-  const text = parts.filter((part) => part.type === "text").map((part) => part.value).join(" ").trim();
+  const text = inboundText(event);
   // Inbound media parts carry a cdn.linqapp.com URL and no mime_type field; the
   // type is inferred from the download, so accept any media part here.
   const photo = parts.find((part) => part.type === "media" && (part.url ?? part.value));
-  if (/^(STOP|UNSUBSCRIBE|OPTOUT|CANCEL|END|QUIT)$/i.test(text)) return { chatId, optedOut: true };
+  if (OPT_OUT.test(text)) return { chatId, optedOut: true };
 
-  return {
+  const base = {
     chatId,
     optedOut: false,
     text,
-    photo: photo ? { url: photo.url ?? photo.value, mimeType: photo.mime_type ?? null, name: photo.filename ?? "photo.jpg" } : null,
-    reply: photo
-      ? "Photo received.\n\nI am identifying the item and will prepare the next listing step shortly."
-      : "Welcome to Room2Store!\n\nSend a photo of anything you want to sell. No caption needed.\n\nAdd 'sell it for me' or any condition details, and I will take it from there."
+    isNewSession: session.isNewSession,
+    photo: photo ? { url: photo.url ?? photo.value, mimeType: photo.mime_type ?? null, name: photo.filename ?? "photo.jpg" } : null
   };
+
+  if (photo) return { ...base, reply: PHOTO_ACK };
+  if (ASK_FOR_ITEMS.test(text)) {
+    return { ...base, reply: session.hasHistory ? formatItemList(session.items) : NOTHING_YET };
+  }
+
+  // The returning-seller option is only offered to a chat that actually has
+  // items; a first-time sender never sees a prompt that would do nothing.
+  if (session.isNewSession) {
+    return { ...base, reply: session.hasHistory ? `${WELCOME}\n\n${RETURNING}` : WELCOME };
+  }
+
+  return { ...base, reply: MID_SESSION };
 }
 
 /**

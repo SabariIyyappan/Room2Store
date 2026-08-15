@@ -46,6 +46,16 @@ With neither variable set the service runs in `demo-fallback` mode, which matche
 
 If identification fails the buyer gets the plain "photo received" acknowledgement, never an invented match.
 
+## Conversation sessions
+
+Linq keeps one chat id per contact forever, so the service tracks its own sessions. A chat that has been quiet for **30 minutes** is treated as a fresh conversation on its next message and gets the welcome again; inside that window it does not, so ordinary back-and-forth is not interrupted by a repeated greeting. The window measures the gap between consecutive messages, not time since first contact.
+
+Items already sent survive the reset. A returning seller whose chat has items is offered one extra line — *"Reply 1 to check on the items you sent before."* — and `1` (or `old`, `items`, `status`) lists them with their provisional prices. A chat with no items is never shown that prompt, and asking anyway gets a plain "you have not sent me any items yet".
+
+An opt-out never starts or refreshes a session.
+
+Session state is in memory, so a redeploy or a free-tier spin-down clears it. Move it behind the database before anything depends on it surviving.
+
 ## Compliance gate
 
 `POST /api/items/:id/confirm` returns `{ item, verdict }`. The verdict comes from `services/compliance`, and `canDeploy(verdict)` is the gate the store builder must respect: prohibited categories, excluded objects, a street address in public copy, or an opted-out contact are a `veto`; unverifiable claims are a `revise`.

@@ -9,8 +9,10 @@ import {
   describeInboundLinqMessage,
   fetchLinqMediaAsDataUrl,
   formatIdentificationReply,
+  isOptOutEvent,
   sendLinqReply
 } from "./linq.mjs";
+import { recordItem, startTurn } from "./sessions.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -78,6 +80,11 @@ async function describePhotoReply(inbound) {
     const imageDataUrl = await fetchLinqMediaAsDataUrl(inbound.photo);
     const identification = await identifyPhoto({ imageName: inbound.photo.name, imageDataUrl });
     items.set(inbound.chatId, identification);
+    recordItem(inbound.chatId, {
+      name: identification.candidates[0]?.name,
+      modelNumber: identification.vision?.model_number,
+      status: identification.needsModelNumber ? "awaiting_model_number" : "identified"
+    });
     return formatIdentificationReply(identification);
   } catch (error) {
     console.log(JSON.stringify({ event: "linq.photo_identification_failed", error: error.message }));
@@ -93,7 +100,12 @@ async function handleLinqWebhook(request, response) {
   if (processedWebhookEvents.has(event.event_id)) return json(response, 200, { status: "duplicate" });
   processedWebhookEvents.add(event.event_id);
 
-  const inbound = describeInboundLinqMessage(event);
+  // An opt-out must not create or refresh a session, so the turn is only
+  // started for a chat we are actually going to talk to.
+  const chatId = event.data?.chat?.id;
+  const session = chatId && !isOptOutEvent(event) ? startTurn(chatId) : { isNewSession: true, hasHistory: false, items: [] };
+
+  const inbound = describeInboundLinqMessage(event, session);
   if (inbound?.reply && !inbound.optedOut) {
     const text = inbound.photo ? await describePhotoReply(inbound) : inbound.reply;
     await sendLinqReply({ chatId: inbound.chatId, text, idempotencyKey: event.event_id });

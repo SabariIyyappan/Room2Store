@@ -144,6 +144,16 @@ test("Linq webhook end to end", async (t) => {
     assert.match(state.replies.at(-1), /Model: WH-1000XM5/);
   });
 
+  await t.test("lists the photographed item back when the seller replies 1", async () => {
+    const response = await postWebhook(port, {
+      event_id: "evt-list",
+      event_type: "message.received",
+      data: { chat: { id: "chat-1" }, parts: [{ type: "text", value: "1" }] }
+    });
+    assert.equal(response.status, 200);
+    assert.match(state.replies.at(-1), /1\. Sony WH-1000XM5 \(WH-1000XM5\)/);
+  });
+
   await t.test("stays silent after an opt-out", async () => {
     const before = state.replies.length;
     const response = await postWebhook(port, {
