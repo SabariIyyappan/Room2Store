@@ -1,0 +1,21 @@
+{
+  "name": "@room2store/storebuilder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "storebuilder:build": "node --env-file=../../.env --experimental-strip-types src/build-cli.ts",
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@room2store/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.2"
+  }
+}

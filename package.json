@@ -1,13 +1,17 @@
 {
   "name": "room2store",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.11.0",
   "scripts": {
     "dev:perception": "node --env-file-if-exists=.env services/perception/src/server.mjs",
     "linq:subscribe": "node --env-file-if-exists=.env scripts/subscribe-webhook.mjs",
     "linq:verify": "node --env-file-if-exists=.env scripts/verify-webhook.mjs",
     "pioneer:probe": "node --env-file-if-exists=.env scripts/probe-pioneer.mjs",
     "gemini:models": "node --env-file-if-exists=.env scripts/list-gemini-models.mjs",
-    "test": "node --test \"services/*/test/**/*.test.mjs\""
+    "test": "node --test \"services/*/test/**/*.test.mjs\"",
+    "test:workspaces": "pnpm --filter @room2store/contracts test && pnpm --filter @room2store/api test && pnpm --filter @room2store/orchestrator test && pnpm --filter @room2store/compliance test && pnpm --filter @room2store/storebuilder test && pnpm --filter @room2store/workflows test",
+    "typecheck": "pnpm --filter @room2store/contracts typecheck && pnpm --filter @room2store/api typecheck && pnpm --filter @room2store/orchestrator typecheck && pnpm --filter @room2store/compliance typecheck && pnpm --filter @room2store/storebuilder typecheck && pnpm --filter @room2store/workflows typecheck"
   }
 }

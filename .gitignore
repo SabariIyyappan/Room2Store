@@ -1,6 +1,10 @@
 .env
 .env.*
 !.env.example
+.env.local
 node_modules/
-.serena/
+.pnpm-store/
+dist/
 coverage/
+.serena/
+.DS_Store

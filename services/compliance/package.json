@@ -1,0 +1,23 @@
+{
+  "name": "@room2store/compliance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "compliance:review": "node --env-file=../../.env --experimental-strip-types src/review-cli.ts",
+    "pii:scrub": "node --env-file=../../.env --experimental-strip-types src/scrub-cli.ts",
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@room2store/contracts": "workspace:*",
+    "@room2store/orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.2"
+  }
+}
