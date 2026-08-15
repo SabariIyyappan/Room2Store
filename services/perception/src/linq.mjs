@@ -1,3 +1,5 @@
+import { buildProductTitle } from "./vision.mjs";
+
 const LINQ_API_URL = process.env.LINQ_API_URL || "https://api.linqapp.com/api/partner/v3";
 
 function getApiKey() {
@@ -163,9 +165,8 @@ export function formatIdentificationReply(identification) {
   const vision = identification?.vision;
   if (!vision) return PHOTO_FAILED;
 
-  const brandKnown = !isUnknown(vision.brand);
   const modelKnown = !isUnknown(vision.model_number);
-  const title = brandKnown ? `${vision.brand} ${vision.product_name}` : vision.product_name;
+  const title = buildProductTitle(vision.brand, vision.product_name);
 
   const lines = [`Looks like a used ${title}.`];
   if (modelKnown) lines.push(`Model number on it: ${vision.model_number}`);

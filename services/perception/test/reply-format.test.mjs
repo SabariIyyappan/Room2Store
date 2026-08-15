@@ -43,3 +43,20 @@ test("no identification at all falls back without promising a follow-up", () => 
   assert.equal(reply, PHOTO_FAILED);
   assert.doesNotMatch(reply, /shortly|will send|identifying/i);
 });
+
+test("a brand already inside the product name is not repeated", () => {
+  const reply = formatIdentificationReply(identification({
+    product_name: "orange Cheetos Crunchy cheese flavored snacks bag",
+    brand: "Cheetos", category: "food", model_number: MODEL_UNKNOWN, confidence: 0.9
+  }));
+  assert.match(reply, /Looks like a used orange Cheetos Crunchy cheese flavored snacks bag\./);
+  assert.doesNotMatch(reply, /Cheetos orange Cheetos/);
+});
+
+test("a brand absent from the product name is still prefixed", () => {
+  const reply = formatIdentificationReply(identification({
+    product_name: "wireless noise-cancelling headphones",
+    brand: "Sony", category: "electronics", model_number: "WH-1000XM5", confidence: 0.9
+  }));
+  assert.match(reply, /Looks like a used Sony wireless noise-cancelling headphones\./);
+});

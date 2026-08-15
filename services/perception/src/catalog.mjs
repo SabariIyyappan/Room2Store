@@ -1,5 +1,5 @@
 import { createNaivePrice } from "../../pricing/src/naive-price.mjs";
-import { MODEL_UNKNOWN, identifyProductWithFallback, isVisionConfigured } from "./vision.mjs";
+import { MODEL_UNKNOWN, buildProductTitle, identifyProductWithFallback, isVisionConfigured } from "./vision.mjs";
 import { identifyWithGemini, isGeminiConfigured } from "./gemini.mjs";
 
 const CATALOGS = [
@@ -56,7 +56,7 @@ function ensureCandidates(payload) {
 
 function visionToCandidate(vision) {
   const modelKnown = vision.model_number !== MODEL_UNKNOWN;
-  const name = [vision.brand, vision.product_name].filter((part) => part && part.toLowerCase() !== "unknown").join(" ").trim();
+  const name = buildProductTitle(vision.brand, vision.product_name);
 
   return {
     id: "pioneer-vision",

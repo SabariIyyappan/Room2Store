@@ -15,8 +15,9 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | Manual Linq messaging | Working | Existing inbound chat was reused for a formatted Room2Store welcome. |
 | Webhook source code | Working | Signature verification, event deduplication, opt-out handling, formatted text reply, and photo identification, all exercised against a stub Linq API. |
 | Tests | Passing | `npm test`: 28 passing tests across perception and compliance. |
-| Public webhook | Not live | No tunnel binary is installed and the Linq variables are unset. |
-| Real vision provider | Implemented, not credentialed | Pioneer path is live once `PIONEER_API_KEY` is set; without it the service stays in explicit demo fallback. |
+| Public webhook | Live | `https://room2store-perception.onrender.com/webhooks/linq`, subscribed to `message.received`, signature verified. |
+| Real vision provider | Live | Google Gemini answering on `gemini-flash-lite-latest`. Pioneer is tried first and 403s: its account has no inference plan, so the code falls through. |
+| Seller conversation | Live | Verified end to end over iMessage: photo → acknowledgement → identification → condition → listing draft. |
 | Compliance gate | Working | `services/compliance` returns a verdict from the confirm endpoint; a veto blocks deploy. |
 
 ## Activity log
@@ -46,3 +47,8 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | 2026-08-15 | Claude | DONE | Render blueprint deployed. `https://room2store-perception.onrender.com` answers `/health` with 200, serves the seller page, validates `/api/identify`, and rejects an unsigned webhook with 401. |
 | 2026-08-15 | Claude | BLOCKED | Waiting on the operator to create the `message.received` subscription in the Linq dashboard and paste the returned `whsec_` secret into Render as `LINQ_WEBHOOK_SECRET`. |
 | 2026-08-15 | Claude | DONE | Added 30-minute conversation sessions and the returning-seller item list in `services/perception/src/sessions.mjs`. `npm test`: 41 passing tests. Session state is in memory and clears on redeploy. |
+| 2026-08-15 | Claude | DONE | Photos now produce two messages: an immediate acknowledgement, then the identification. The webhook is answered before the vision call so a slow provider cannot cause a redelivery. |
+| 2026-08-15 | Claude | DONE | Diagnosed the vision failures by surfacing provider error bodies. Pioneer returns 403 "subscribe to the Hobby or Pro plan" on every model; its endpoint, auth and model ids were all correct. Providers now fall through, so one dead provider cannot stop identification. |
+| 2026-08-15 | Claude | DONE | Google retired `gemini-2.5-flash` and `gemini-2.0-flash`. Switched to floating `-latest` aliases with every model id overridable by environment variable. |
+| 2026-08-15 | Claude | DONE | Verified live over iMessage end to end: text welcome, photo acknowledgement, Gemini identification, condition question, listing draft. `npm test`: 65 passing tests. |
+| 2026-08-15 | Claude | DONE | Fixed a duplicated brand in listing titles ("Cheetos orange Cheetos Crunchy...") seen in the live run. |

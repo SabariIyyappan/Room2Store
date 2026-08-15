@@ -39,6 +39,19 @@ export const IDENTIFICATION_SYSTEM_PROMPT =
   'return an empty product_name, and never return "unknown" for it. Set brand to ' +
   '"Unknown" when no brand is visible; that is expected and is not a failure.';
 
+/**
+ * Joins brand and product name without repeating the brand. The model often
+ * already includes it, so a naive join produces "Cheetos orange Cheetos
+ * Crunchy cheese flavored snacks bag".
+ */
+export function buildProductTitle(brand, productName) {
+  const name = String(productName ?? "").trim();
+  const brandName = String(brand ?? "").trim();
+  if (!brandName || brandName.toLowerCase() === "unknown") return name;
+  if (new RegExp(`\\b${brandName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name)) return name;
+  return `${brandName} ${name}`.trim();
+}
+
 export function isVisionConfigured() {
   return Boolean(process.env.PIONEER_API_KEY);
 }
