@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { isBandMessage, type BandAgent, type BandMessage } from "@room2store/contracts";
-import { BandApiClient, protocolEvent, type BandClient, type BandPeer } from "./band-client.ts";
-import { campaignRoles, type BandIdentity, type BandRole } from "./roles.ts";
+import { BandApiClient, protocolEvent, type BandClient, type BandEvent, type BandPeer } from "./band-client.ts";
+import { campaignRoles, type BandIdentity, type BandRole, type SpecialistRole } from "./roles.ts";
+import { sandboxLifecycleIntent } from "./sandbox-lifecycle.ts";
+import type { SandboxLifecycleEvent, SandboxManager } from "./sandbox-manager.ts";
 
 const roleEmitter: Record<BandRole, BandAgent> = {
   flowCoordinator: "orchestrator",
@@ -11,6 +14,8 @@ const roleEmitter: Record<BandRole, BandAgent> = {
   storePublisher: "store",
   salesConcierge: "sales",
   settlementClerk: "finance",
+  electronicsSpecialist: "specialist",
+  furnitureSpecialist: "specialist",
 };
 
 export interface CampaignRoomStore {
@@ -64,13 +69,16 @@ function protocolContent(message: BandMessage, recipients: BandPeer[]): string {
 export class BandRoomService {
   private readonly clients: Record<BandRole, BandClient>;
   private readonly campaignStore: CampaignRoomStore;
+  private readonly sandboxManager: SandboxManager | undefined;
 
   constructor(
     clients: Record<BandRole, BandClient>,
     campaignStore: CampaignRoomStore,
+    sandboxManager?: SandboxManager,
   ) {
     this.clients = clients;
     this.campaignStore = campaignStore;
+    this.sandboxManager = sandboxManager;
   }
 
   async verifyIdentities(): Promise<Record<BandRole, BandPeer>> {
@@ -120,6 +128,79 @@ export class BandRoomService {
     const recipients = this.peersForRoles(participants, roles);
     await client.sendMessage(request.roomId, protocolContent(request.message, recipients), recipients);
     await client.postEvent(request.roomId, protocolEvent(request.message));
+
+    await this.reactToSandboxLifecycle(request.roomId, request.message);
+  }
+
+  /**
+   * B8: "store deployed" pauses the campaign's Superserve sandbox, "sales
+   * inquiry / offer" resumes it — whichever role happens to post those
+   * protocol messages, the reaction fires here so no future caller has to
+   * remember to wire it up separately. A no-op when no sandbox manager was
+   * configured (e.g. most tests) or the message isn't one of the two.
+   */
+  private async reactToSandboxLifecycle(roomId: string, message: BandMessage): Promise<void> {
+    if (!this.sandboxManager) return;
+    const intent = sandboxLifecycleIntent(message);
+    if (!intent) return;
+
+    const outcome =
+      intent.action === "pause"
+        ? await this.sandboxManager.pause(intent.campaignId, intent.reason)
+        : await this.sandboxManager.resume(intent.campaignId, intent.reason);
+    await this.postSandboxEvent(roomId, outcome);
+  }
+
+  /** Logs a Superserve sandbox lifecycle transition to the dashboard's Band feed. */
+  async postSandboxEvent(roomId: string, sandboxEvent: SandboxLifecycleEvent): Promise<void> {
+    const event: BandEvent = {
+      content: `Superserve sandbox ${sandboxEvent.action} for campaign ${sandboxEvent.campaignId} — ${sandboxEvent.reason}`,
+      messageType: "task",
+      metadata: { ...sandboxEvent },
+    };
+    await this.clients.flowCoordinator.postEvent(roomId, event);
+  }
+
+  /**
+   * B5: adds a specialist to the room and announces it, at the moment the
+   * category actually calls for one — not at C0 bootstrap. Idempotent per
+   * item+role so re-inspecting a catalog doesn't spawn duplicates.
+   */
+  async spawnSpecialist(request: {
+    roomId: string;
+    campaignId: string;
+    role: SpecialistRole;
+    itemId: string;
+    reason: string;
+    notify?: BandRole[];
+  }): Promise<void> {
+    const coordinator = this.clients.flowCoordinator;
+    const specialistAgentId = this.clients[request.role].identity.agentId;
+    const alreadySpawned = (await coordinator.getParticipants(request.roomId)).some((peer) => peer.id === specialistAgentId);
+    if (!alreadySpawned) await coordinator.addParticipant(request.roomId, specialistAgentId);
+
+    const message: Extract<BandMessage, { name: "specialist spawn" }> = {
+      id: `specialist_${randomUUID()}`,
+      campaignId: request.campaignId,
+      emittedAt: new Date().toISOString(),
+      emitter: "orchestrator",
+      name: "specialist spawn",
+      agentName: this.clients[request.role].identity.name,
+      itemId: request.itemId,
+      reason: request.reason,
+    };
+    await this.postProtocolMessage({
+      roomId: request.roomId,
+      role: "flowCoordinator",
+      message,
+      recipients: [request.role, ...(request.notify ?? [])],
+    });
+  }
+
+  /** A specialist's own finding that isn't one of the frozen protocol messages — still visible in the Band feed. */
+  async postSpecialistNote(request: { roomId: string; role: SpecialistRole; content: string; metadata?: Record<string, unknown> }): Promise<void> {
+    const event: BandEvent = { content: request.content, messageType: "thought", metadata: request.metadata ?? {} };
+    await this.clients[request.role].postEvent(request.roomId, event);
   }
 
   async readProtocolHistory(roomId: string): Promise<BandMessage[]> {
@@ -155,8 +236,9 @@ export class BandRoomService {
 export function createLiveBandRoomService(
   identities: Record<BandRole, BandIdentity>,
   campaignStore: CampaignRoomStore,
+  sandboxManager?: SandboxManager,
 ): BandRoomService {
   const clients = {} as Record<BandRole, BandClient>;
   for (const [role, identity] of Object.entries(identities) as [BandRole, BandIdentity][]) clients[role] = new BandApiClient(identity);
-  return new BandRoomService(clients, campaignStore);
+  return new BandRoomService(clients, campaignStore, sandboxManager);
 }

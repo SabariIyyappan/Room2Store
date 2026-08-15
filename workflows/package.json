@@ -1,0 +1,26 @@
+{
+  "name": "@room2store/workflows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "workflow:demo": "node --env-file=../.env --experimental-strip-types src/pipeline-cli.ts",
+    "workflow:decay": "node --env-file=../.env --experimental-strip-types src/decay-cli.ts",
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@renderinc/sdk": "^0.6.0",
+    "@room2store/contracts": "workspace:*",
+    "@room2store/orchestrator": "workspace:*",
+    "@room2store/compliance": "workspace:*",
+    "@room2store/storebuilder": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.2"
+  }
+}

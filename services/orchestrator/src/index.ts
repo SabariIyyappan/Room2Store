@@ -3,3 +3,7 @@ export * from "./gate-engine.ts";
 export * from "./in-memory-band.ts";
 export * from "./roles.ts";
 export * from "./room-service.ts";
+export * from "./sandbox-lifecycle.ts";
+export * from "./sandbox-manager.ts";
+export * from "./specialists.ts";
+export * from "./spawn-specialists.ts";

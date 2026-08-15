@@ -68,6 +68,30 @@ test("B4 requires catalog completion before research starts", async () => {
   assert.equal((await engine.evaluate({ transition: "startResearch", campaignId, roomId, itemId })).allowed, true);
 });
 
+test("B5 blocks research after a reshoot request until catalog re-clears the item", async () => {
+  const { roomService, roomId, engine } = await setup();
+  await roomService.postProtocolMessage({
+    roomId, role: "roomCataloger", recipients: ["pricingResearcher"],
+    message: protocol({ id: "catalog_002", campaignId, emittedAt: "2026-08-15T10:00:00Z", emitter: "catalog", name: "catalog items ready", itemIds: [itemId] }),
+  });
+  assert.equal((await engine.evaluate({ transition: "startResearch", campaignId, roomId, itemId })).allowed, true);
+
+  await roomService.spawnSpecialist({ roomId, campaignId, role: "furnitureSpecialist", itemId, reason: "furniture needs verified dimensions" });
+  await roomService.postProtocolMessage({
+    roomId, role: "furnitureSpecialist", recipients: ["roomCataloger"],
+    message: protocol({ id: "reshoot_002", campaignId, emittedAt: "2026-08-15T10:05:00Z", emitter: "specialist", name: "catalog needs reshoot", itemId, reason: "no dimensions captured" }),
+  });
+  const blocked = await engine.evaluate({ transition: "startResearch", campaignId, roomId, itemId });
+  assert.equal(blocked.allowed, false);
+  if (!blocked.allowed) assert.match(blocked.missingPrerequisites[0], /reshoot/);
+
+  await roomService.postProtocolMessage({
+    roomId, role: "roomCataloger", recipients: ["pricingResearcher"],
+    message: protocol({ id: "catalog_003", campaignId, emittedAt: "2026-08-15T10:10:00Z", emitter: "catalog", name: "catalog items ready", itemIds: [itemId] }),
+  });
+  assert.equal((await engine.evaluate({ transition: "startResearch", campaignId, roomId, itemId })).allowed, true);
+});
+
 test("B4 requires a compliance approval before store deployment", async () => {
   const { roomService, roomId, engine } = await setup();
   assert.equal((await engine.evaluate({ transition: "deployStore", campaignId, roomId, itemIds: [itemId] })).allowed, false);

@@ -56,7 +56,19 @@ function missingPrerequisites(request: GateRequest, messages: BandMessage[]): st
   switch (request.transition) {
     case "startResearch": {
       const itemId = itemRequired(request);
-      return campaignMessages.some((message) => message.name === "catalog items ready" && message.itemIds.includes(itemId)) ? [] : ["catalog items ready"];
+      // B5: a furniture specialist's reshoot request supersedes any earlier
+      // "catalog items ready" for that item. Research stays blocked until a
+      // fresh "catalog items ready" (posted after the reshoot) clears it.
+      const catalogSignals = campaignMessages
+        .filter(
+          (message): message is Extract<BandMessage, { name: "catalog items ready" } | { name: "catalog needs reshoot" }> =>
+            (message.name === "catalog items ready" && message.itemIds.includes(itemId)) ||
+            (message.name === "catalog needs reshoot" && message.itemId === itemId),
+        )
+        .sort((a, b) => a.emittedAt.localeCompare(b.emittedAt));
+      const latest = catalogSignals.at(-1);
+      if (!latest) return ["catalog items ready"];
+      return latest.name === "catalog needs reshoot" ? ["catalog items ready after reshoot"] : [];
     }
     case "setPrice": {
       const itemId = itemRequired(request);
