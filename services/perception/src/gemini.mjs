@@ -12,8 +12,10 @@ import { IDENTIFICATION_SYSTEM_PROMPT, MODEL_UNKNOWN, parseIdentificationRespons
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const REQUEST_TIMEOUT_MS = 15_000;
 
-export const GEMINI_PRIMARY_MODEL = "gemini-2.5-flash";
-export const GEMINI_FALLBACK_MODEL = "gemini-2.0-flash";
+// Google retires model ids without warning: 2.5-flash and 2.0-flash both 404 as
+// of August 2026. Confirm the live ids with `npm run gemini:models`.
+export const GEMINI_PRIMARY_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
+export const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-flash-lite-latest";
 
 export function isGeminiConfigured() {
   return Boolean(process.env.GEMINI_API_KEY);
