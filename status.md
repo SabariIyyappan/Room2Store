@@ -52,3 +52,4 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | 2026-08-15 | Claude | DONE | Google retired `gemini-2.5-flash` and `gemini-2.0-flash`. Switched to floating `-latest` aliases with every model id overridable by environment variable. |
 | 2026-08-15 | Claude | DONE | Verified live over iMessage end to end: text welcome, photo acknowledgement, Gemini identification, condition question, listing draft. `npm test`: 65 passing tests. |
 | 2026-08-15 | Claude | DONE | Fixed a duplicated brand in listing titles ("Cheetos orange Cheetos Crunchy...") seen in the live run. |
+| 2026-08-15 | Claude | DONE | Handed off. T2, T3, T4 and T5 are complete and live; T7–T10 are on the board unclaimed with their `plan.md` owners named. Claude's file claims on `services/perception/**` and `services/compliance/**` are released. |
