@@ -15,5 +15,7 @@ services:
         sync: false
       - key: LINQ_PHONE_NUMBER
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
       - key: PIONEER_API_KEY
         sync: false

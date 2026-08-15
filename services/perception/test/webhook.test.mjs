@@ -162,6 +162,22 @@ test("Linq webhook end to end", async (t) => {
     assert.deepEqual(state.visionCalls, ["claude-haiku-4-5"]);
   });
 
+  await t.test("answering the condition produces the listing draft", async () => {
+    const response = await postWebhook(port, {
+      event_id: "evt-condition",
+      event_type: "message.received",
+      data: { chat: { id: "chat-1" }, parts: [{ type: "text", value: "good" }] }
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "listed" });
+
+    const draft = state.replies.at(-1);
+    assert.match(draft, /Here is your listing:/);
+    assert.match(draft, /Sony WH-1000XM5/);
+    assert.match(draft, /Condition: good/);
+    assert.match(draft, /Price: \$25 \(placeholder/);
+  });
+
   await t.test("lists the photographed item back when the seller replies 1", async () => {
     const response = await postWebhook(port, {
       event_id: "evt-list",

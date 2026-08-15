@@ -16,7 +16,8 @@ export const MODEL_UNKNOWN = "MODEL_UNKNOWN";
 
 const REQUIRED_KEYS = ["product_name", "brand", "category", "model_number", "confidence"];
 
-const SYSTEM_PROMPT =
+/** Shared by every provider so they cannot drift apart on the rules that matter. */
+export const IDENTIFICATION_SYSTEM_PROMPT =
   "You are a product identification module for a resale pricing pipeline. " +
   "Given a single photo of an object, respond ONLY with strict JSON, no " +
   "markdown fences, no preamble, matching this exact schema: " +
@@ -90,7 +91,7 @@ async function callModel(modelId, { imageBase64, mediaType }) {
     body: JSON.stringify({
       model: modelId,
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      system: IDENTIFICATION_SYSTEM_PROMPT,
       messages: [
         {
           role: "user",

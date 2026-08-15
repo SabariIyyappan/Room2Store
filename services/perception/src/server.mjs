@@ -9,11 +9,12 @@ import {
   describeInboundLinqMessage,
   fetchLinqMediaAsDataUrl,
   formatIdentificationReply,
+  formatListingDraft,
   isOptOutEvent,
   PHOTO_FAILED,
   sendLinqReply
 } from "./linq.mjs";
-import { recordItem, startTurn } from "./sessions.mjs";
+import { recordItem, setCondition, startTurn } from "./sessions.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -122,6 +123,16 @@ async function handleLinqWebhook(request, response) {
   const session = chatId && !isOptOutEvent(event) ? startTurn(chatId) : { isNewSession: true, hasHistory: false, items: [] };
 
   const inbound = describeInboundLinqMessage(event, session);
+
+  // The seller answered the condition question: complete the item and send the draft.
+  if (inbound?.condition && !inbound.optedOut) {
+    const item = setCondition(inbound.chatId, inbound.condition);
+    if (item) {
+      await sendLinqReply({ chatId: inbound.chatId, text: formatListingDraft(item), idempotencyKey: event.event_id });
+      return json(response, 200, { status: "listed" });
+    }
+  }
+
   if (!inbound?.reply || inbound.optedOut) {
     return json(response, 200, { status: inbound?.optedOut ? "opted_out" : "processed" });
   }

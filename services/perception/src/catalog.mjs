@@ -1,5 +1,6 @@
 import { createNaivePrice } from "../../pricing/src/naive-price.mjs";
 import { MODEL_UNKNOWN, identifyProductWithFallback, isVisionConfigured } from "./vision.mjs";
+import { identifyWithGemini, isGeminiConfigured } from "./gemini.mjs";
 
 const CATALOGS = [
   {
@@ -72,9 +73,11 @@ function visionToCandidate(vision) {
 }
 
 export async function identifyPhoto({ imageName, imageDataUrl }) {
-  if (isVisionConfigured()) {
-    const vision = await identifyProductWithFallback(imageDataUrl);
-    const identification = buildIdentification([visionToCandidate(vision)], "pioneer-vision");
+  // Gemini first: Pioneer's catalogue has no vision-capable model.
+  if (isGeminiConfigured() || isVisionConfigured()) {
+    const useGemini = isGeminiConfigured();
+    const vision = useGemini ? await identifyWithGemini(imageDataUrl) : await identifyProductWithFallback(imageDataUrl);
+    const identification = buildIdentification([visionToCandidate(vision)], useGemini ? "gemini-vision" : "pioneer-vision");
     return {
       ...identification,
       vision,

@@ -2,9 +2,13 @@
 
 Run `npm run dev:perception`, then open `http://localhost:3000` on a phone or computer. The page supports a camera capture or image upload, offers model choices when identification is uncertain, and creates a provisional naive-price handoff after confirmation.
 
+## Vision identification (Gemini)
+
+Set `GEMINI_API_KEY` and photos are read by Google Gemini — `gemini-2.5-flash`, falling back to `gemini-2.0-flash`. The key is sent as an `x-goog-api-key` header rather than a `?key=` query parameter, so it never lands in a URL or an access log. This is the preferred provider and takes precedence over Pioneer.
+
 ## Vision identification (Pioneer)
 
-Set `PIONEER_API_KEY` (format `pio_sk_...`) and the service reads the actual photo through Pioneer's Anthropic-compatible endpoint:
+Pioneer is used only when `GEMINI_API_KEY` is unset. **Its published catalogue is GLiNER, Qwen, Llama and Gemma — no vision-capable model — so this path returns 403 on every attempt with a normal key.** Set `PIONEER_API_KEY` (format `pio_sk_...`) to use its Anthropic-compatible endpoint:
 
 | Attempt | Model | When |
 | --- | --- | --- |
@@ -62,6 +66,20 @@ What condition is it in — new, excellent, good, or fair?
 
 If you can find a model or part number on a label, send it too and I can price it more accurately.
 ```
+
+Answering the condition (`new`, `excellent`, `good`, `fair`; `like new` and `used` are mapped onto those) completes the item and returns the listing draft:
+
+```
+Here is your listing:
+
+blue plastic stacking chair
+Condition: good
+Price: $25 (placeholder — the real price comes from the pricing study)
+
+Send another photo to add another item.
+```
+
+The price is a hard-coded placeholder and says so in the message itself, so it can never be mistaken for a measured price. It is replaced once the Terac study runs. A condition word sent when no item is waiting for one is ignored rather than misread.
 
 The model asks for a plain resale name including colour or material, so an unbranded item still gets something usable rather than "unknown". A model number is offered as an optional accuracy improvement in chat — unlike the web flow, which requires it before confirming. If identification fails entirely the seller is told plainly and asked what the item is; nothing is ever invented.
 

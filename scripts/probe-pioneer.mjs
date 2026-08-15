@@ -50,7 +50,9 @@ const attempts = [
   { label: "openai /v1/chat/completions + Bearer", url: "https://api.pioneer.ai/v1/chat/completions", headers: { authorization: `Bearer ${key}` }, body: openaiBody("claude-haiku-4-5") },
   { label: "openai /v1/chat/completions + x-api-key", url: "https://api.pioneer.ai/v1/chat/completions", headers: { "x-api-key": key }, body: openaiBody("claude-haiku-4-5") },
   { label: "text-only (is it the image that is refused?)", url: "https://api.pioneer.ai/v1/messages", headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, body: { model: "claude-haiku-4-5", max_tokens: 16, messages: [{ role: "user", content: "Reply with the single word OK." }] } },
-  { label: "model list", url: "https://api.pioneer.ai/v1/models", headers: { "x-api-key": key }, method: "GET" }
+  // The docs' one authoritative call: what can this key actually reach?
+  { label: "BASE MODEL LIST (the important one)", url: "https://api.pioneer.ai/base-models", headers: { "X-API-Key": key }, method: "GET" },
+  { label: "openai-style model list", url: "https://api.pioneer.ai/v1/models", headers: { "X-API-Key": key }, method: "GET" }
 ];
 
 for (const attempt of attempts) {
@@ -61,7 +63,8 @@ for (const attempt of attempts) {
       headers: { "content-type": "application/json", ...attempt.headers },
       ...(attempt.method === "GET" ? {} : { body: JSON.stringify(attempt.body) })
     });
-    const text = (await response.text()).slice(0, 300).replace(/\s+/g, " ").trim();
+    const limit = attempt.method === "GET" ? 2_000 : 300;
+    const text = (await response.text()).slice(0, limit).replace(/\s+/g, " ").trim();
     console.log(`\n[${response.status}] ${attempt.label}\n    ${text}`);
     if (response.ok) console.log("    ^ THIS ONE WORKS");
   } catch (error) {

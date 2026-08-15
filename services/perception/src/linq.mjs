@@ -27,6 +27,8 @@ export async function sendLinqReply({ chatId, text, idempotencyKey }) {
 const MAX_MEDIA_BYTES = 5_000_000;
 
 const OPT_OUT = /^(STOP|UNSUBSCRIBE|OPTOUT|CANCEL|END|QUIT)$/i;
+const CONDITION = /^(new|like new|excellent|good|fair|used)\b/i;
+const PLACEHOLDER_PRICE = "$25";
 const ASK_FOR_ITEMS = /^(1|OLD|ITEMS|MY ITEMS|OLD ITEMS|PRODUCTS|OLD PRODUCTS|HISTORY|STATUS)$/i;
 
 const WELCOME = "Welcome to Room2Store!\n\nSend a photo of anything you want to sell. No caption needed.\n\nAdd 'sell it for me' or any condition details, and I will take it from there.";
@@ -90,6 +92,11 @@ export function describeInboundLinqMessage(event, session = { isNewSession: true
     return { ...base, reply: session.hasHistory ? formatItemList(session.items) : NOTHING_YET };
   }
 
+  // A condition only means something while an item is waiting for one.
+  if (session.awaitingCondition && CONDITION.test(text)) {
+    return { ...base, condition: normalizeCondition(text) };
+  }
+
   // The returning-seller option is only offered to a chat that actually has
   // items; a first-time sender never sees a prompt that would do nothing.
   if (session.isNewSession) {
@@ -119,6 +126,27 @@ export async function fetchLinqMediaAsDataUrl(photo) {
   if (!mimeType.startsWith("image/")) throw new Error(`Inbound attachment is ${mimeType}, not an image.`);
 
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
+function normalizeCondition(text) {
+  const word = CONDITION.exec(text)[1].toLowerCase();
+  return word === "like new" ? "new" : word === "used" ? "good" : word;
+}
+
+/**
+ * The finished listing draft. The price is a placeholder until the Terac study
+ * measures a real one, and says so, so nobody mistakes it for a measured price.
+ */
+export function formatListingDraft(item) {
+  return [
+    "Here is your listing:",
+    "",
+    item.name,
+    `Condition: ${item.condition}`,
+    `Price: ${PLACEHOLDER_PRICE} (placeholder — the real price comes from the pricing study)`,
+    "",
+    "Send another photo to add another item."
+  ].join("\n");
 }
 
 function isUnknown(value) {

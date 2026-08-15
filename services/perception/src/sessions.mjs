@@ -33,7 +33,13 @@ export function startTurn(chatId, now = Date.now()) {
   const isNewSession = idleMs > SESSION_TIMEOUT_MS;
   chat.lastSeenAt = now;
 
-  return { isNewSession, hasHistory: chat.items.length > 0, items: [...chat.items], idleMs };
+  return {
+    isNewSession,
+    hasHistory: chat.items.length > 0,
+    items: [...chat.items],
+    awaitingCondition: Boolean(itemAwaitingCondition(chatId)),
+    idleMs
+  };
 }
 
 /** Remembers an identified item so the seller can ask about it later. */
@@ -43,10 +49,27 @@ export function recordItem(chatId, item, now = Date.now()) {
     name: item.name ?? "Unnamed item",
     modelNumber: item.modelNumber ?? null,
     status: item.status ?? "identified",
+    condition: null,
     naivePrice: item.naivePrice ?? null,
     receivedAt: now
   });
   return chat.items.length;
+}
+
+/** The most recent item still waiting for its condition, if there is one. */
+export function itemAwaitingCondition(chatId) {
+  const items = getChat(chatId).items;
+  const last = items[items.length - 1];
+  return last && !last.condition ? last : null;
+}
+
+/** Attaches the condition the seller replied with, completing the item. */
+export function setCondition(chatId, condition) {
+  const item = itemAwaitingCondition(chatId);
+  if (!item) return null;
+  item.condition = condition;
+  item.status = "listed_draft";
+  return item;
 }
 
 export function listItems(chatId) {
