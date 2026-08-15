@@ -14,8 +14,11 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 // Google retires model ids without warning: 2.5-flash and 2.0-flash both 404 as
 // of August 2026. Confirm the live ids with `npm run gemini:models`.
-export const GEMINI_PRIMARY_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
-export const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-flash-lite-latest";
+export const GEMINI_PRIMARY_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-3-flash";
+export const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash";
+// A floating alias that cannot be retired out from under us, so a wrong pinned
+// id degrades to a working call instead of failing the photo.
+export const GEMINI_SAFETY_MODEL = process.env.GEMINI_SAFETY_MODEL || "gemini-flash-lite-latest";
 
 export function isGeminiConfigured() {
   return Boolean(process.env.GEMINI_API_KEY);
@@ -67,7 +70,8 @@ export async function identifyWithGemini(imageDataUrl, { log = defaultLog } = {}
   const image = parseImageDataUrl(imageDataUrl);
   const errors = [];
 
-  for (const modelId of [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL]) {
+  const attempts = [...new Set([GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SAFETY_MODEL])];
+  for (const modelId of attempts) {
     const startedAt = Date.now();
     try {
       const result = await callModel(modelId, image);

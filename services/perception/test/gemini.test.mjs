@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GEMINI_FALLBACK_MODEL, GEMINI_PRIMARY_MODEL, identifyWithGemini, isGeminiConfigured } from "../src/gemini.mjs";
+import { GEMINI_FALLBACK_MODEL, GEMINI_PRIMARY_MODEL, GEMINI_SAFETY_MODEL, identifyWithGemini, isGeminiConfigured } from "../src/gemini.mjs";
 import { MODEL_UNKNOWN } from "../src/vision.mjs";
 
 const IMAGE = "data:image/jpeg;base64,AA==";
@@ -90,6 +90,21 @@ test("a blocked image is reported as a decline, not a parse error", async () => 
   });
   try {
     await assert.rejects(identifyWithGemini(IMAGE, { log: silent }), /declined the image: SAFETY/);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a retired pinned id degrades to the floating alias instead of failing", async () => {
+  const stub = stubGemini({
+    [GEMINI_PRIMARY_MODEL]: () => ({ ok: false, status: 404, text: async () => "no longer available" }),
+    [GEMINI_FALLBACK_MODEL]: () => ({ ok: false, status: 404, text: async () => "no longer available" }),
+    [GEMINI_SAFETY_MODEL]: () => reply('{"product_name":"blue plastic stacking chair","brand":"Unknown","category":"furniture","model_number":"MODEL_UNKNOWN","confidence":0.8}')
+  });
+  try {
+    const result = await identifyWithGemini(IMAGE, { log: silent });
+    assert.equal(result.model, GEMINI_SAFETY_MODEL);
+    assert.equal(result.product_name, "blue plastic stacking chair");
   } finally {
     stub.restore();
   }
