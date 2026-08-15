@@ -15,8 +15,9 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | Manual Linq messaging | Working | Existing inbound chat was reused for a formatted Room2Store welcome. |
 | Webhook source code | Working | Signature verification, event deduplication, opt-out handling, formatted text reply, and photo identification, all exercised against a stub Linq API. |
 | Tests | Passing | `npm test`: 28 passing tests across perception and compliance. |
-| Public webhook | Not live | No tunnel binary is installed and the Linq variables are unset. |
-| Real vision provider | Implemented, not credentialed | Pioneer path is live once `PIONEER_API_KEY` is set; without it the service stays in explicit demo fallback. |
+| Public webhook | Live | `https://room2store-perception.onrender.com/webhooks/linq`, subscribed to `message.received`, signature verified. |
+| Real vision provider | Live | Google Gemini answering on `gemini-flash-lite-latest`. Pioneer is tried first and 403s: its account has no inference plan, so the code falls through. |
+| Seller conversation | Live | Verified end to end over iMessage: photo → acknowledgement → identification → condition → listing draft. |
 | Compliance gate | Working | `services/compliance` returns a verdict from the confirm endpoint; a veto blocks deploy. |
 
 ## Activity log
@@ -41,6 +42,7 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | 2026-08-15 | Claude | DONE | Service boots locally on port 3000 and answers `/health`. `npm run dev:perception` now loads `.env` through Node's `--env-file-if-exists`. |
 | 2026-08-15 | Codex | PROGRESS | Re-read the shared protocol and task board; Claude owns T2, T4, and T5. Codex will not edit those claimed files. |
 | 2026-08-15 | Codex | STARTED | T6: customer-led upgrade add-on analysis; reading the plan, perception README, and Terac guidebook. |
+| 2026-08-15 | Codex | DONE | T6: created `upgrade-plan.md`, a customer-led add-on centered on seller control, price evidence, and the Linq buyer trust card. |
 | 2026-08-15 | Claude | DONE | Committed the work and pushed `feat/photo-identification` to both `SabariIyyappan/Room2Store` and `suriya911/Room2Store`. Render could not see the team repo because its GitHub App is not installed on that account; deploying from the operator's own copy instead. |
 | 2026-08-15 | Claude | DONE | Render blueprint deployed. `https://room2store-perception.onrender.com` answers `/health` with 200, serves the seller page, validates `/api/identify`, and rejects an unsigned webhook with 401. |
 | 2026-08-15 | Claude | BLOCKED | Waiting on the operator to create the `message.received` subscription in the Linq dashboard and paste the returned `whsec_` secret into Render as `LINQ_WEBHOOK_SECRET`. |
@@ -48,3 +50,9 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | 2026-08-15 | User C | DONE | T7: pushed `services/web` — React/Vite judge-facing frontend (seller upload, setup flow, agent-orchestration dashboard, buyer storefront). Mock data in `src/data/mock.ts`. `npm run build` clean, 2385 modules, 606 KB bundle. Merged into `main`. |
 | 2026-08-15 | User C | DONE | T8: added env-driven CORS middleware to `services/perception/src/server.mjs`. Allowlist from `CORS_ORIGINS` (comma-separated); defaults to `http://localhost:5173,http://localhost:3000`; wildcard `*` supported. Preflight OPTIONS returns 204 with headers. `test/cors.test.mjs` covers allowlisted preflight, allowed GET, disallowed origin (no ACAO), and wildcard. `npm test`: 45 passing tests. |
 | 2026-08-15 | User C | DONE | T9: ran Terac resale-marketplace pricing study (n=5, opportunity `gd6hergw1sdvi8i61gb6cnao`). 5/5 approved. Median WTP $575, trimmed mean $510, min-seen median $350. Recommendation for study item: list $549, accept $450. Photo quality avg 3.5/5 → better photos likely lift WTP 15–25%. Missing-info signal: materials, dimensions, condition, seller trust, pickup details (5/6 respondents each). |
+| 2026-08-15 | Claude | DONE | Photos now produce two messages: an immediate acknowledgement, then the identification. The webhook is answered before the vision call so a slow provider cannot cause a redelivery. |
+| 2026-08-15 | Claude | DONE | Diagnosed the vision failures by surfacing provider error bodies. Pioneer returns 403 "subscribe to the Hobby or Pro plan" on every model; its endpoint, auth and model ids were all correct. Providers now fall through, so one dead provider cannot stop identification. |
+| 2026-08-15 | Claude | DONE | Google retired `gemini-2.5-flash` and `gemini-2.0-flash`. Switched to floating `-latest` aliases with every model id overridable by environment variable. |
+| 2026-08-15 | Claude | DONE | Verified live over iMessage end to end: text welcome, photo acknowledgement, Gemini identification, condition question, listing draft. `npm test`: 65 passing tests. |
+| 2026-08-15 | Claude | DONE | Fixed a duplicated brand in listing titles ("Cheetos orange Cheetos Crunchy...") seen in the live run. |
+| 2026-08-15 | Claude | DONE | Handed off. T2, T3, T4 and T5 are complete and live; T7–T10 are on the board unclaimed with their `plan.md` owners named. Claude's file claims on `services/perception/**` and `services/compliance/**` are released. |

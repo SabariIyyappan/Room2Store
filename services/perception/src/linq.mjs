@@ -1,3 +1,5 @@
+import { buildProductTitle } from "./vision.mjs";
+
 const LINQ_API_URL = process.env.LINQ_API_URL || "https://api.linqapp.com/api/partner/v3";
 
 function getApiKey() {
@@ -27,10 +29,15 @@ export async function sendLinqReply({ chatId, text, idempotencyKey }) {
 const MAX_MEDIA_BYTES = 5_000_000;
 
 const OPT_OUT = /^(STOP|UNSUBSCRIBE|OPTOUT|CANCEL|END|QUIT)$/i;
+const CONDITION = /^(new|like new|excellent|good|fair|used)\b/i;
+const PLACEHOLDER_PRICE = "$25";
 const ASK_FOR_ITEMS = /^(1|OLD|ITEMS|MY ITEMS|OLD ITEMS|PRODUCTS|OLD PRODUCTS|HISTORY|STATUS)$/i;
 
 const WELCOME = "Welcome to Room2Store!\n\nSend a photo of anything you want to sell. No caption needed.\n\nAdd 'sell it for me' or any condition details, and I will take it from there.";
-const PHOTO_ACK = "Photo received.\n\nI am identifying the item and will prepare the next listing step shortly.";
+// Sent the moment a photo arrives; the identification follows in its own message.
+export const PHOTO_RECEIVED = "Got it — looking at your photo now.";
+// Sent instead of a result when identification could not run at all.
+export const PHOTO_FAILED = "I could not get a good look at that one.\n\nTell me what it is and I will take it from there, or send another photo.";
 const RETURNING = "Reply 1 to check on the items you sent before.";
 const MID_SESSION = "Send a photo of the item and I will take it from there.";
 const NOTHING_YET = "You have not sent me any items yet.\n\nSend a photo of something you want to sell and I will identify it.";
@@ -82,9 +89,14 @@ export function describeInboundLinqMessage(event, session = { isNewSession: true
     photo: photo ? { url: photo.url ?? photo.value, mimeType: photo.mime_type ?? null, name: photo.filename ?? "photo.jpg" } : null
   };
 
-  if (photo) return { ...base, reply: PHOTO_ACK };
+  if (photo) return { ...base, reply: PHOTO_RECEIVED };
   if (ASK_FOR_ITEMS.test(text)) {
     return { ...base, reply: session.hasHistory ? formatItemList(session.items) : NOTHING_YET };
+  }
+
+  // A condition only means something while an item is waiting for one.
+  if (session.awaitingCondition && CONDITION.test(text)) {
+    return { ...base, condition: normalizeCondition(text) };
   }
 
   // The returning-seller option is only offered to a chat that actually has
@@ -118,24 +130,54 @@ export async function fetchLinqMediaAsDataUrl(photo) {
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }
 
-/** Buyer-facing summary of a vision identification, formatted for iMessage. */
+function normalizeCondition(text) {
+  const word = CONDITION.exec(text)[1].toLowerCase();
+  return word === "like new" ? "new" : word === "used" ? "good" : word;
+}
+
+/**
+ * The finished listing draft. The price is a placeholder until the Terac study
+ * measures a real one, and says so, so nobody mistakes it for a measured price.
+ */
+export function formatListingDraft(item) {
+  return [
+    "Here is your listing:",
+    "",
+    item.name,
+    `Condition: ${item.condition}`,
+    `Price: ${PLACEHOLDER_PRICE} (placeholder — the real price comes from the pricing study)`,
+    "",
+    "Send another photo to add another item."
+  ].join("\n");
+}
+
+function isUnknown(value) {
+  return !value || value.toLowerCase() === "unknown" || value === "MODEL_UNKNOWN";
+}
+
+/**
+ * Buyer-facing summary of an identification, in marketplace-listing voice.
+ *
+ * A missing brand or model never blocks the reply: the seller always gets a
+ * usable name for the item, the way a Facebook Marketplace listing reads.
+ */
 export function formatIdentificationReply(identification) {
   const vision = identification?.vision;
-  if (!vision) return "Photo received.\n\nI am identifying the item and will prepare the next listing step shortly.";
+  if (!vision) return PHOTO_FAILED;
 
-  const lines = [
-    `I see: ${[vision.brand, vision.product_name].filter((part) => part && part.toLowerCase() !== "unknown").join(" ") || vision.product_name}`,
-    `Category: ${vision.category || "unknown"}`
-  ];
+  const modelKnown = !isUnknown(vision.model_number);
+  const title = buildProductTitle(vision.brand, vision.product_name);
 
-  if (identification.needsModelNumber) {
-    lines.push("", "I could not read a model or part number on it. Reply with the model / part number and I will price it accurately.");
-  } else {
-    lines.push(`Model: ${vision.model_number}`, "", "Reply with the condition (new, excellent, good, fair) and I will price it.");
+  const lines = [`Looks like a used ${title}.`];
+  if (modelKnown) lines.push(`Model number on it: ${vision.model_number}`);
+
+  lines.push("", "What condition is it in — new, excellent, good, or fair?");
+
+  if (!modelKnown) {
+    lines.push("", "If you can find a model or part number on a label, send it too and I can price it more accurately.");
   }
-
   if (identification.fieldsEditable) {
-    lines.push("", "I am not confident on this one. Correct me if the product or brand is wrong.");
+    lines.push("", "Correct me if I have got the item wrong.");
   }
 
   return lines.join("\n");

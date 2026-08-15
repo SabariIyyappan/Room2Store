@@ -1,5 +1,6 @@
 import { createNaivePrice } from "../../pricing/src/naive-price.mjs";
-import { MODEL_UNKNOWN, identifyProductWithFallback, isVisionConfigured } from "./vision.mjs";
+import { MODEL_UNKNOWN, buildProductTitle, identifyProductWithFallback, isVisionConfigured } from "./vision.mjs";
+import { identifyWithGemini, isGeminiConfigured } from "./gemini.mjs";
 
 const CATALOGS = [
   {
@@ -55,7 +56,7 @@ function ensureCandidates(payload) {
 
 function visionToCandidate(vision) {
   const modelKnown = vision.model_number !== MODEL_UNKNOWN;
-  const name = [vision.brand, vision.product_name].filter((part) => part && part.toLowerCase() !== "unknown").join(" ").trim();
+  const name = buildProductTitle(vision.brand, vision.product_name);
 
   return {
     id: "pioneer-vision",
@@ -71,10 +72,34 @@ function visionToCandidate(vision) {
   };
 }
 
+/**
+ * Tries each configured vision provider in turn and reports which one answered.
+ * Every failure is carried into the final error so the real cause survives.
+ */
+async function identifyWithAnyProvider(imageDataUrl) {
+  const providers = [
+    { source: "pioneer-vision", enabled: isVisionConfigured(), run: identifyProductWithFallback },
+    { source: "gemini-vision", enabled: isGeminiConfigured(), run: identifyWithGemini }
+  ].filter((provider) => provider.enabled);
+
+  const errors = [];
+  for (const provider of providers) {
+    try {
+      return { vision: await provider.run(imageDataUrl), source: provider.source };
+    } catch (error) {
+      errors.push(`${provider.source}: ${error.message}`);
+    }
+  }
+
+  throw new Error(errors.join(" || "));
+}
+
 export async function identifyPhoto({ imageName, imageDataUrl }) {
-  if (isVisionConfigured()) {
-    const vision = await identifyProductWithFallback(imageDataUrl);
-    const identification = buildIdentification([visionToCandidate(vision)], "pioneer-vision");
+  // Pioneer first (the hackathon credits live there), then direct Google. A
+  // provider outage or a missing plan on one must not take identification down.
+  if (isVisionConfigured() || isGeminiConfigured()) {
+    const { vision, source } = await identifyWithAnyProvider(imageDataUrl);
+    const identification = buildIdentification([visionToCandidate(vision)], source);
     return {
       ...identification,
       vision,

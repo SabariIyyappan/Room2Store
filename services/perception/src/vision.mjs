@@ -1,22 +1,28 @@
 /**
- * Pioneer AI (Fastino Labs) vision identification.
+ * Vision identification through Pioneer's OpenAI-compatible endpoint.
  *
- * Anthropic-compatible endpoint. The model must never invent a model number:
- * when no label, sticker, or engraving is legible it returns MODEL_UNKNOWN and
- * the caller is responsible for asking a human to type it in.
+ * Pioneer hosts Gemini among ~112 models. Model ids are namespaced (the docs'
+ * own example uses "pioneer/auto"), so they are configurable rather than
+ * hard-coded — a wrong id is the difference between working and a 403/404.
+ *
+ * The model must never invent a model number: when no label, sticker, or
+ * engraving is legible it returns MODEL_UNKNOWN and the caller asks a human.
  */
 
-const DEFAULT_BASE_URL = "https://api.pioneer.ai";
+const DEFAULT_BASE_URL = "https://api.pioneer.ai/v1";
 const REQUEST_TIMEOUT_MS = 15_000;
 
-export const PRIMARY_MODEL = "claude-haiku-4-5";
-export const FALLBACK_MODEL = "gemini-2.5-flash";
-export const HARD_CASE_MODEL = "claude-opus-4-7";
+// Cheapest multimodal model on the account, then a slightly newer one, then the
+// router that picks whatever meets the quality bar.
+export const PRIMARY_MODEL = process.env.VISION_PRIMARY_MODEL || "google/gemini-3.1-flash-lite";
+export const FALLBACK_MODEL = process.env.VISION_FALLBACK_MODEL || "google/gemini-3.5-flash-lite";
+export const HARD_CASE_MODEL = process.env.VISION_HARD_CASE_MODEL || "pioneer/auto";
 export const MODEL_UNKNOWN = "MODEL_UNKNOWN";
 
 const REQUIRED_KEYS = ["product_name", "brand", "category", "model_number", "confidence"];
 
-const SYSTEM_PROMPT =
+/** Shared by every provider so they cannot drift apart on the rules that matter. */
+export const IDENTIFICATION_SYSTEM_PROMPT =
   "You are a product identification module for a resale pricing pipeline. " +
   "Given a single photo of an object, respond ONLY with strict JSON, no " +
   "markdown fences, no preamble, matching this exact schema: " +
@@ -26,7 +32,25 @@ const SYSTEM_PROMPT =
   "engraving on the item. If no model number or serial number is visible " +
   `anywhere in the image, set model_number to the literal string "${MODEL_UNKNOWN}". ` +
   "confidence is 0.0-1.0, your certainty on brand+category identification. " +
-  "Never guess a model number that is not literally visible as text in the image.";
+  "Never guess a model number that is not literally visible as text in the image. " +
+  "product_name must always be filled in with a short plain-English name a " +
+  "resale listing would use, including colour or material when they are obvious " +
+  '— for example "black mesh office chair" or "white ceramic table lamp". Never ' +
+  'return an empty product_name, and never return "unknown" for it. Set brand to ' +
+  '"Unknown" when no brand is visible; that is expected and is not a failure.';
+
+/**
+ * Joins brand and product name without repeating the brand. The model often
+ * already includes it, so a naive join produces "Cheetos orange Cheetos
+ * Crunchy cheese flavored snacks bag".
+ */
+export function buildProductTitle(brand, productName) {
+  const name = String(productName ?? "").trim();
+  const brandName = String(brand ?? "").trim();
+  if (!brandName || brandName.toLowerCase() === "unknown") return name;
+  if (new RegExp(`\\b${brandName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(name)) return name;
+  return `${brandName} ${name}`.trim();
+}
 
 export function isVisionConfigured() {
   return Boolean(process.env.PIONEER_API_KEY);
@@ -74,23 +98,24 @@ export function parseIdentificationResponse(rawText) {
 
 async function callModel(modelId, { imageBase64, mediaType }) {
   const baseUrl = (process.env.PIONEER_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
-  const response = await fetch(`${baseUrl}/v1/messages`, {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       "content-type": "application/json",
-      "x-api-key": getApiKey(),
-      "anthropic-version": "2023-06-01"
+      authorization: `Bearer ${getApiKey()}`
     },
     body: JSON.stringify({
       model: modelId,
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      temperature: 0,
+      stream: false,
       messages: [
+        { role: "system", content: IDENTIFICATION_SYSTEM_PROMPT },
         {
           role: "user",
           content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
+            { type: "image_url", image_url: { url: `data:${mediaType};base64,${imageBase64}` } },
             { type: "text", text: "Identify this product per the schema." }
           ]
         }
@@ -98,9 +123,16 @@ async function callModel(modelId, { imageBase64, mediaType }) {
     })
   });
 
-  if (!response.ok) throw new Error(`Pioneer request failed with status ${response.status}.`);
+  if (!response.ok) {
+    // The body carries the actual reason (bad key, unknown model, no entitlement);
+    // without it every failure looks identical.
+    const detail = (await response.text().catch(() => "")).slice(0, 300).replace(/\s+/g, " ").trim();
+    throw new Error(`Pioneer request failed with status ${response.status}${detail ? `: ${detail}` : "."}`);
+  }
+
   const payload = await response.json();
-  const text = payload?.content?.find?.((part) => part.type === "text")?.text ?? payload?.content?.[0]?.text;
+  const text = payload?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("Pioneer returned no message content.");
   return parseIdentificationResponse(text);
 }
 
@@ -117,10 +149,10 @@ export async function identifyProductWithFallback(imageDataUrl, { log = defaultL
     const startedAt = Date.now();
     try {
       const result = await callModel(modelId, image);
-      log({ event: "vision.identify", model: modelId, latencyMs: Date.now() - startedAt, confidence: result.confidence, ok: true });
+      log({ event: "vision.identify", provider: "pioneer", model: modelId, latencyMs: Date.now() - startedAt, confidence: result.confidence, ok: true });
       return { ...result, model: modelId };
     } catch (error) {
-      log({ event: "vision.identify", model: modelId, latencyMs: Date.now() - startedAt, ok: false, error: error.message });
+      log({ event: "vision.identify", provider: "pioneer", model: modelId, latencyMs: Date.now() - startedAt, ok: false, error: error.message });
       errors.push(`${modelId}: ${error.message}`);
     }
   }

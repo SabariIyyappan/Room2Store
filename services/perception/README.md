@@ -2,17 +2,23 @@
 
 Run `npm run dev:perception`, then open `http://localhost:3000` on a phone or computer. The page supports a camera capture or image upload, offers model choices when identification is uncertain, and creates a provisional naive-price handoff after confirmation.
 
-## Vision identification (Pioneer)
+## Vision identification (Pioneer, hosting Gemini)
 
-Set `PIONEER_API_KEY` (format `pio_sk_...`) and the service reads the actual photo through Pioneer's Anthropic-compatible endpoint:
+Set `PIONEER_API_KEY` (format `pio_sk_...`) and photos are read through Pioneer's **OpenAI-compatible** endpoint, `POST /v1/chat/completions` with `Authorization: Bearer`. Pioneer hosts Gemini among ~112 models, which is where the hackathon credits apply.
 
 | Attempt | Model | When |
 | --- | --- | --- |
-| 1 | `claude-haiku-4-5` | Always |
-| 2 | `gemini-2.5-flash` | Primary errored or returned unparsable JSON |
-| 3 | `claude-opus-4-7` | Both cheap attempts failed; escalated once, then a clean error |
+| 1 | `google/gemini-3.1-flash-lite` | Always — cheapest multimodal model, $0.25/$1.50 per Mtok |
+| 2 | `google/gemini-3.5-flash-lite` | Primary errored or returned unparsable JSON |
+| 3 | `pioneer/auto` | Both failed; the router picks whatever meets the quality bar |
 
-Every call is logged as JSON with its model, latency, and confidence.
+**Model ids are namespaced and must match the account's catalogue exactly** — a wrong id is a 403 or 404, not a helpful error. Override any of them with `VISION_PRIMARY_MODEL`, `VISION_FALLBACK_MODEL`, `VISION_HARD_CASE_MODEL`, and confirm the real ids with `npm run pioneer:probe`, which lists `/base-models`.
+
+Every call is logged as JSON with its provider, model, latency, and confidence. Failures include the response body, so a bad key, an unknown model, and a missing entitlement are told apart rather than all reading as "403".
+
+## Direct Google fallback
+
+`GEMINI_API_KEY` is used only when `PIONEER_API_KEY` is unset: `gemini-2.5-flash`, falling back to `gemini-2.0-flash`, against Google's own API. The key is sent as an `x-goog-api-key` header rather than a `?key=` query parameter, so it never lands in a URL or an access log.
 
 The model returns `{ product_name, brand, category, model_number, confidence }`. A model number is only reported when it is literally legible on the item; otherwise it is the literal string `MODEL_UNKNOWN`, the API response sets `needsModelNumber: true`, and both the web page and the iMessage reply ask the seller to type it in. Confirmation is refused until they do. When `confidence < 0.5` the response sets `fieldsEditable: true` and the product name becomes an editable field.
 
@@ -41,10 +47,43 @@ With neither variable set the service runs in `demo-fallback` mode, which matche
 `POST /webhooks/linq` verifies the `webhook-id` / `webhook-timestamp` / `webhook-signature` triple against `LINQ_WEBHOOK_SECRET`, rejects replays by `event_id`, and answers in the same chat:
 
 - text → the Room2Store welcome
-- photo → media is downloaded, identified, and the reply names the product, or asks for the model number when none was legible
+- photo → **two messages**: an immediate "Got it — looking at your photo now", then the identification in its own message once vision returns
 - `STOP` and the other opt-out keywords → no reply at all
 
-If identification fails the buyer gets the plain "photo received" acknowledgement, never an invented match.
+The webhook is acknowledged before the vision call starts, so a slow identification cannot make Linq time out and redeliver the event. The result message uses `${event_id}-result` as its idempotency key, since reusing the acknowledgement's key would make Linq drop it as a repeat.
+
+Replies read like a marketplace listing, and a missing brand or model never blocks one:
+
+```
+Looks like a used Sony WH-1000XM5.
+Model number on it: WH-1000XM5
+
+What condition is it in — new, excellent, good, or fair?
+```
+
+```
+Looks like a used black mesh office chair.
+
+What condition is it in — new, excellent, good, or fair?
+
+If you can find a model or part number on a label, send it too and I can price it more accurately.
+```
+
+Answering the condition (`new`, `excellent`, `good`, `fair`; `like new` and `used` are mapped onto those) completes the item and returns the listing draft:
+
+```
+Here is your listing:
+
+blue plastic stacking chair
+Condition: good
+Price: $25 (placeholder — the real price comes from the pricing study)
+
+Send another photo to add another item.
+```
+
+The price is a hard-coded placeholder and says so in the message itself, so it can never be mistaken for a measured price. It is replaced once the Terac study runs. A condition word sent when no item is waiting for one is ignored rather than misread.
+
+The model asks for a plain resale name including colour or material, so an unbranded item still gets something usable rather than "unknown". A model number is offered as an optional accuracy improvement in chat — unlike the web flow, which requires it before confirming. If identification fails entirely the seller is told plainly and asked what the item is; nothing is ever invented.
 
 ## Conversation sessions
 
