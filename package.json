@@ -1,0 +1,10 @@
+{
+  "name": "room2store",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "typecheck": "pnpm --filter @room2store/contracts typecheck && pnpm --filter @room2store/api typecheck && pnpm --filter @room2store/orchestrator typecheck",
+    "test": "pnpm --filter @room2store/contracts test && pnpm --filter @room2store/api test && pnpm --filter @room2store/orchestrator test"
+  }
+}
