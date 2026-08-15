@@ -20,6 +20,31 @@ const items = new Map();
 const processedWebhookEvents = new Set();
 const mimeTypes = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
 
+const corsAllowlist = (process.env.CORS_ORIGINS ?? "http://localhost:5173,http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function corsHeadersFor(origin) {
+  if (corsAllowlist.includes("*")) {
+    return {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-headers": "content-type",
+      "access-control-max-age": "86400"
+    };
+  }
+  if (!origin || !corsAllowlist.includes(origin)) return {};
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-credentials": "true",
+    "vary": "origin",
+    "access-control-max-age": "86400"
+  };
+}
+
 function json(response, status, body) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(body));
@@ -115,6 +140,12 @@ async function handleLinqWebhook(request, response) {
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
+  const cors = corsHeadersFor(request.headers.origin);
+  for (const [name, value] of Object.entries(cors)) response.setHeader(name, value);
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    return response.end();
+  }
   try {
     if (request.method === "POST" && url.pathname === "/webhooks/linq") {
       return await handleLinqWebhook(request, response);
