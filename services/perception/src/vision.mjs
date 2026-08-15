@@ -98,7 +98,12 @@ async function callModel(modelId, { imageBase64, mediaType }) {
     })
   });
 
-  if (!response.ok) throw new Error(`Pioneer request failed with status ${response.status}.`);
+  if (!response.ok) {
+    // The body carries the actual reason (bad key, unknown model, no entitlement);
+    // without it every failure looks identical.
+    const detail = (await response.text().catch(() => "")).slice(0, 300).replace(/\s+/g, " ").trim();
+    throw new Error(`Pioneer request failed with status ${response.status}${detail ? `: ${detail}` : "."}`);
+  }
   const payload = await response.json();
   const text = payload?.content?.find?.((part) => part.type === "text")?.text ?? payload?.content?.[0]?.text;
   return parseIdentificationResponse(text);

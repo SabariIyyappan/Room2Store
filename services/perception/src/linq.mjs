@@ -30,7 +30,9 @@ const OPT_OUT = /^(STOP|UNSUBSCRIBE|OPTOUT|CANCEL|END|QUIT)$/i;
 const ASK_FOR_ITEMS = /^(1|OLD|ITEMS|MY ITEMS|OLD ITEMS|PRODUCTS|OLD PRODUCTS|HISTORY|STATUS)$/i;
 
 const WELCOME = "Welcome to Room2Store!\n\nSend a photo of anything you want to sell. No caption needed.\n\nAdd 'sell it for me' or any condition details, and I will take it from there.";
-const PHOTO_ACK = "Photo received.\n\nI am identifying the item and will prepare the next listing step shortly.";
+// Only sent when identification failed. It must not promise a follow-up
+// message, because nothing sends one.
+const PHOTO_ACK = "Photo received, but I could not identify it just now.\n\nTell me what it is and I will take it from there, or send another photo.";
 const RETURNING = "Reply 1 to check on the items you sent before.";
 const MID_SESSION = "Send a photo of the item and I will take it from there.";
 const NOTHING_YET = "You have not sent me any items yet.\n\nSend a photo of something you want to sell and I will identify it.";
@@ -121,7 +123,7 @@ export async function fetchLinqMediaAsDataUrl(photo) {
 /** Buyer-facing summary of a vision identification, formatted for iMessage. */
 export function formatIdentificationReply(identification) {
   const vision = identification?.vision;
-  if (!vision) return "Photo received.\n\nI am identifying the item and will prepare the next listing step shortly.";
+  if (!vision) return PHOTO_ACK;
 
   const lines = [
     `I see: ${[vision.brand, vision.product_name].filter((part) => part && part.toLowerCase() !== "unknown").join(" ") || vision.product_name}`,
