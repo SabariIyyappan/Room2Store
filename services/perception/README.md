@@ -2,21 +2,23 @@
 
 Run `npm run dev:perception`, then open `http://localhost:3000` on a phone or computer. The page supports a camera capture or image upload, offers model choices when identification is uncertain, and creates a provisional naive-price handoff after confirmation.
 
-## Vision identification (Gemini)
+## Vision identification (Pioneer, hosting Gemini)
 
-Set `GEMINI_API_KEY` and photos are read by Google Gemini — `gemini-2.5-flash`, falling back to `gemini-2.0-flash`. The key is sent as an `x-goog-api-key` header rather than a `?key=` query parameter, so it never lands in a URL or an access log. This is the preferred provider and takes precedence over Pioneer.
-
-## Vision identification (Pioneer)
-
-Pioneer is used only when `GEMINI_API_KEY` is unset. **Its published catalogue is GLiNER, Qwen, Llama and Gemma — no vision-capable model — so this path returns 403 on every attempt with a normal key.** Set `PIONEER_API_KEY` (format `pio_sk_...`) to use its Anthropic-compatible endpoint:
+Set `PIONEER_API_KEY` (format `pio_sk_...`) and photos are read through Pioneer's **OpenAI-compatible** endpoint, `POST /v1/chat/completions` with `Authorization: Bearer`. Pioneer hosts Gemini among ~112 models, which is where the hackathon credits apply.
 
 | Attempt | Model | When |
 | --- | --- | --- |
-| 1 | `claude-haiku-4-5` | Always |
-| 2 | `gemini-2.5-flash` | Primary errored or returned unparsable JSON |
-| 3 | `claude-opus-4-7` | Both cheap attempts failed; escalated once, then a clean error |
+| 1 | `google/gemini-3.1-flash-lite` | Always — cheapest multimodal model, $0.25/$1.50 per Mtok |
+| 2 | `google/gemini-3.5-flash-lite` | Primary errored or returned unparsable JSON |
+| 3 | `pioneer/auto` | Both failed; the router picks whatever meets the quality bar |
 
-Every call is logged as JSON with its model, latency, and confidence.
+**Model ids are namespaced and must match the account's catalogue exactly** — a wrong id is a 403 or 404, not a helpful error. Override any of them with `VISION_PRIMARY_MODEL`, `VISION_FALLBACK_MODEL`, `VISION_HARD_CASE_MODEL`, and confirm the real ids with `npm run pioneer:probe`, which lists `/base-models`.
+
+Every call is logged as JSON with its provider, model, latency, and confidence. Failures include the response body, so a bad key, an unknown model, and a missing entitlement are told apart rather than all reading as "403".
+
+## Direct Google fallback
+
+`GEMINI_API_KEY` is used only when `PIONEER_API_KEY` is unset: `gemini-2.5-flash`, falling back to `gemini-2.0-flash`, against Google's own API. The key is sent as an `x-goog-api-key` header rather than a `?key=` query parameter, so it never lands in a URL or an access log.
 
 The model returns `{ product_name, brand, category, model_number, confidence }`. A model number is only reported when it is literally legible on the item; otherwise it is the literal string `MODEL_UNKNOWN`, the API response sets `needsModelNumber: true`, and both the web page and the iMessage reply ask the seller to type it in. Confirmation is refused until they do. When `confidence < 0.5` the response sets `fieldsEditable: true` and the product name becomes an editable field.
 

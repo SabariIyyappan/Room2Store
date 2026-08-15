@@ -15,20 +15,23 @@ const silent = () => {};
 function textResponse(body) {
   return {
     ok: true,
-    json: async () => ({ content: [{ type: "text", text: body }] })
+    json: async () => ({ choices: [{ message: { role: "assistant", content: body } }] })
   };
 }
 
 function stubPioneer(responders) {
   const calls = [];
+  const requests = [];
   const original = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
-    const model = JSON.parse(options.body).model;
-    calls.push(model);
-    return responders[model]?.() ?? { ok: false, status: 500 };
+    const parsed = JSON.parse(options.body);
+    calls.push(parsed.model);
+    requests.push({ url, headers: options.headers, body: parsed });
+    return responders[parsed.model]?.() ?? { ok: false, status: 500, text: async () => "no stub" };
   };
   return {
     calls,
+    requests,
     restore() {
       globalThis.fetch = original;
     }
@@ -64,6 +67,23 @@ test("a visible model sticker returns the real model number", async () => {
     assert.equal(result.model_number, "WH-1000XM5");
     assert.equal(result.model, PRIMARY_MODEL);
     assert.deepEqual(stub.calls, [PRIMARY_MODEL]);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("it calls the OpenAI-compatible endpoint with bearer auth and an image part", async () => {
+  const stub = stubPioneer({
+    [PRIMARY_MODEL]: () => textResponse('{"product_name":"chair","brand":"Unknown","category":"furniture","model_number":"MODEL_UNKNOWN","confidence":0.8}')
+  });
+  try {
+    await identifyProductWithFallback(IMAGE, { log: silent });
+    const request = stub.requests[0];
+    assert.match(request.url, /\/v1\/chat\/completions$/);
+    assert.equal(request.headers.authorization, "Bearer pio_sk_test");
+    assert.equal(request.body.messages[0].role, "system");
+    assert.equal(request.body.messages[1].content[0].type, "image_url");
+    assert.match(request.body.messages[1].content[0].image_url.url, /^data:image\/jpeg;base64,/);
   } finally {
     stub.restore();
   }

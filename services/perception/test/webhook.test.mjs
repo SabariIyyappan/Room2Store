@@ -29,13 +29,15 @@ async function startStub(state) {
     let body = "";
     for await (const chunk of request) body += chunk;
 
-    if (request.url === "/v1/messages") {
+    if (request.url === "/v1/chat/completions") {
       state.visionCalls.push(JSON.parse(body).model);
       response.writeHead(200, { "content-type": "application/json" });
       return response.end(JSON.stringify({
-        content: [{
-          type: "text",
-          text: '{"product_name":"WH-1000XM5","brand":"Sony","category":"electronics","model_number":"WH-1000XM5","confidence":0.93}'
+        choices: [{
+          message: {
+            role: "assistant",
+            content: '{"product_name":"WH-1000XM5","brand":"Sony","category":"electronics","model_number":"WH-1000XM5","confidence":0.93}'
+          }
         }]
       }));
     }
@@ -59,7 +61,7 @@ async function startService(stubPort) {
       LINQ_API_KEY: "linq_test_key",
       LINQ_API_URL: `http://127.0.0.1:${stubPort}/v3`,
       PIONEER_API_KEY: "pio_sk_test",
-      PIONEER_BASE_URL: `http://127.0.0.1:${stubPort}`
+      PIONEER_BASE_URL: `http://127.0.0.1:${stubPort}/v1`
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -159,7 +161,7 @@ test("Linq webhook end to end", async (t) => {
     assert.match(result, /Looks like a used Sony WH-1000XM5\./);
     assert.match(result, /Model number on it: WH-1000XM5/);
     assert.match(result, /What condition is it in/);
-    assert.deepEqual(state.visionCalls, ["claude-haiku-4-5"]);
+    assert.deepEqual(state.visionCalls, ["google/gemini-3.1-flash-lite"]);
   });
 
   await t.test("answering the condition produces the listing draft", async () => {

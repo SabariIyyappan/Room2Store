@@ -73,11 +73,12 @@ function visionToCandidate(vision) {
 }
 
 export async function identifyPhoto({ imageName, imageDataUrl }) {
-  // Gemini first: Pioneer's catalogue has no vision-capable model.
-  if (isGeminiConfigured() || isVisionConfigured()) {
-    const useGemini = isGeminiConfigured();
-    const vision = useGemini ? await identifyWithGemini(imageDataUrl) : await identifyProductWithFallback(imageDataUrl);
-    const identification = buildIdentification([visionToCandidate(vision)], useGemini ? "gemini-vision" : "pioneer-vision");
+  // Pioneer first: it hosts Gemini and the hackathon credits live there.
+  // GEMINI_API_KEY is the direct-to-Google escape hatch.
+  if (isVisionConfigured() || isGeminiConfigured()) {
+    const usePioneer = isVisionConfigured();
+    const vision = usePioneer ? await identifyProductWithFallback(imageDataUrl) : await identifyWithGemini(imageDataUrl);
+    const identification = buildIdentification([visionToCandidate(vision)], usePioneer ? "pioneer-vision" : "gemini-vision");
     return {
       ...identification,
       vision,

@@ -7,7 +7,7 @@ const IMAGE = "data:image/jpeg;base64,AA==";
 
 function stubVision(body) {
   const original = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ content: [{ type: "text", text: body }] }) });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: body } }] }) });
   return () => {
     globalThis.fetch = original;
   };
