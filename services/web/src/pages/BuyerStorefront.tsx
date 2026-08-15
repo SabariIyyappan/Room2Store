@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Search, BadgeCheck, MapPin, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Search, BadgeCheck, MapPin, Loader2, MessageSquare } from "lucide-react";
 import {
   DEFAULT_RADIUS_MILES,
   MAX_RADIUS_MILES,
   MIN_RADIUS_MILES,
+  SELLER_PHONE,
   fetchListings,
   type Listing,
 } from "@/lib/api";
@@ -203,6 +203,16 @@ export default function BuyerStorefront() {
   );
 }
 
+/**
+ * Opens the messaging app with the listing code already in the body. The buyer
+ * has to send it themselves, which satisfies Linq's inbound-first rule.
+ */
+function smsHref(listing: Listing) {
+  const body = encodeURIComponent(`I'm interested in ${listing.code} (${listing.name})`);
+  // iOS wants &body=, Android wants ?body=; the ?& form works on both.
+  return `sms:${SELLER_PHONE}?&body=${body}`;
+}
+
 function ProductCard({ listing }: { listing: Listing }) {
   const priced = listing.priceStatus === "measured" && listing.price != null;
 
@@ -242,24 +252,26 @@ function ProductCard({ listing }: { listing: Listing }) {
           {listing.distanceMiles != null && <> · {listing.distanceMiles} mi away</>}
         </div>
 
+        {/* Texting the code is how a negotiation starts: the agent looks the
+            listing up by it, so the message must arrive with it already typed. */}
         <div className="space-y-2">
-          <button
-            disabled={!priced}
+          <a
+            href={smsHref(listing)}
             className={cn(
-              "w-full h-9 rounded-md text-sm font-medium transition-colors",
+              "flex items-center justify-center gap-1.5 w-full h-9 rounded-md text-sm font-medium transition-colors",
               priced
                 ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
+                : "bg-zinc-100 text-zinc-400 pointer-events-none"
             )}
+            aria-disabled={!priced}
           >
-            {priced ? "Reserve" : "Awaiting price"}
-          </button>
-          <Button variant="outline" className="w-full h-9" disabled={!priced}>
-            Make offer
-          </Button>
+            <MessageSquare className="w-4 h-4" />
+            {priced ? "Interested" : "Awaiting price"}
+          </a>
+          <div className="text-[11px] text-zinc-500 text-center">
+            Free local pickup · code <span className="font-mono font-semibold">{listing.code}</span>
+          </div>
         </div>
-
-        <div className="text-[11px] text-zinc-500 mt-2 text-center">Free local pickup</div>
       </div>
     </div>
   );

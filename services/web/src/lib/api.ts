@@ -12,6 +12,9 @@ export const DEFAULT_RADIUS_MILES = 20;
 export const MIN_RADIUS_MILES = 10;
 export const MAX_RADIUS_MILES = 100;
 
+/** The Linq number buyers text. Build-time config so it is never hard-coded. */
+export const SELLER_PHONE = import.meta.env.VITE_LINQ_PHONE ?? "+12134559546";
+
 export type ListingLocation = {
   zip: string;
   city: string;
@@ -22,12 +25,15 @@ export type ListingLocation = {
 
 export type Listing = {
   id: string;
+  /** Short human-typable code a buyer texts to start a negotiation. */
+  code: string;
   name: string;
   condition: string;
   modelNumber: string | null;
   photoUrl: string | null;
   /** null until the pricing study has measured one. Never invent a number here. */
   price: number | null;
+  floorPrice?: number | null;
   priceStatus: "being_measured" | "measured";
   location: ListingLocation;
   publishedAt: string;

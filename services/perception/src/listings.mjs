@@ -1,94 +1,62 @@
 /**
  * Published listings and the buyer-facing radius query.
  *
- * Writes through to Engineer B's REST API when ROOM2STORE_API_BASE_URL is set,
- * and always keeps a local copy so the buyer query works before that service is
- * deployed. The local copy is in memory and dies with the process — it is a
- * bridge until the database is live, not a store.
+ * Everything goes through the store, so a listing survives a redeploy when
+ * DATABASE_URL is set and lives in memory when it is not. Distance filtering is
+ * done here rather than in SQL: the listing count is small and the maths is
+ * identical on both backends.
  */
 
 import { DEFAULT_RADIUS_MILES, clampRadius, distanceMiles } from "./geo.mjs";
-
-const published = new Map();
+import {
+  findListingById,
+  generateListingCode,
+  insertListing,
+  listLiveListings,
+  updateListing,
+  upsertSeller
+} from "./store.mjs";
 
 /**
  * A listing is only publishable once it has a location; the buyer filter has
  * nothing to measure from otherwise. Price is deliberately optional — an item
  * is listed before the pricing study returns, and shows as "price pending".
  */
-export async function publishListing(item, { fetchImpl = fetch } = {}) {
+export async function publishListing(item) {
   if (!item?.location) throw new Error("A listing needs a pickup location before it can be published.");
 
+  const seller = await upsertSeller({ chatId: item.sellerChatId ?? "unknown", phone: item.sellerPhone });
   const listing = {
     id: item.id ?? crypto.randomUUID(),
-    // Kept so the seller can be texted the moment a price is measured.
+    code: item.code ?? generateListingCode(),
+    sellerId: seller.id,
     sellerChatId: item.sellerChatId ?? null,
     name: item.name,
+    category: item.category ?? "other",
+    modelNumber: item.modelNumber && item.modelNumber !== "MODEL_UNKNOWN" ? item.modelNumber : null,
     condition: item.condition,
-    modelNumber: item.modelNumber ?? null,
     photoUrl: item.photoUrl ?? null,
     price: item.measuredPrice ?? null,
+    floorPrice: item.floorPrice ?? null,
     priceStatus: item.measuredPrice == null ? "being_measured" : "measured",
-    location: {
-      zip: item.location.zip,
-      city: item.location.city,
-      state: item.location.state,
-      latitude: item.location.latitude,
-      longitude: item.location.longitude
-    },
+    status: "live",
+    location: { ...item.location },
     publishedAt: new Date().toISOString()
   };
 
-  published.set(listing.id, listing);
+  await insertListing(listing);
   item.id = listing.id;
-
-  const apiBaseUrl = process.env.ROOM2STORE_API_BASE_URL;
-  if (apiBaseUrl) {
-    try {
-      await writeThroughToApi(apiBaseUrl, listing, fetchImpl);
-    } catch (error) {
-      // The seller has already been told their listing is live, and it is —
-      // locally. Losing the durable copy is worth logging, not worth failing.
-      console.log(JSON.stringify({ event: "listing.api_write_failed", id: listing.id, error: error.message }));
-    }
-  }
-
+  item.code = listing.code;
   return listing;
 }
 
-async function writeThroughToApi(apiBaseUrl, listing, fetchImpl) {
-  const campaignId = process.env.ROOM2STORE_CAMPAIGN_ID;
-  if (!campaignId) throw new Error("ROOM2STORE_CAMPAIGN_ID is not set.");
-
-  const response = await fetchImpl(`${apiBaseUrl.replace(/\/+$/, "")}/campaigns/${campaignId}/items`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    signal: AbortSignal.timeout(10_000),
-    body: JSON.stringify({
-      id: listing.id,
-      name: listing.name,
-      category: "other",
-      attributes: { modelNumber: listing.modelNumber },
-      condition: listing.condition,
-      conditionNotes: "",
-      photoUrls: listing.photoUrl ? [listing.photoUrl] : [],
-      status: "live",
-      pickupZip: listing.location.zip,
-      pickupLatitude: listing.location.latitude,
-      pickupLongitude: listing.location.longitude
-    })
-  });
-
-  if (!response.ok) throw new Error(`API write failed with status ${response.status}.`);
-}
-
 /**
- * Buyer query. Without an origin every listing is returned; with one, only
+ * Buyer query. Without an origin every live listing is returned; with one, only
  * those inside the radius, nearest first.
  */
-export function queryListings({ origin, radiusMiles = DEFAULT_RADIUS_MILES } = {}) {
+export async function queryListings({ origin, radiusMiles = DEFAULT_RADIUS_MILES } = {}) {
   const radius = clampRadius(radiusMiles);
-  const all = [...published.values()];
+  const all = await listLiveListings();
   if (!origin) return { radiusMiles: radius, listings: all };
 
   const withDistance = all
@@ -100,22 +68,17 @@ export function queryListings({ origin, radiusMiles = DEFAULT_RADIUS_MILES } = {
 }
 
 /** Attaches a measured price once the pricing study returns. */
-export function setMeasuredPrice(listingId, price, { floorPrice = null, studyId = null } = {}) {
-  const listing = published.get(listingId);
-  if (!listing) return null;
-  listing.price = price;
-  listing.floorPrice = floorPrice;
-  listing.studyId = studyId;
-  listing.priceStatus = "measured";
-  listing.pricedAt = new Date().toISOString();
-  return listing;
+export async function setMeasuredPrice(listingId, price, { floorPrice = null, studyId = null } = {}) {
+  const existing = await findListingById(listingId);
+  if (!existing) return null;
+
+  return updateListing(listingId, {
+    price,
+    // No explicit floor means the seller will not go below the measured price.
+    floorPrice: floorPrice ?? price,
+    studyId,
+    priceStatus: "measured"
+  });
 }
 
-export function getListing(listingId) {
-  return published.get(listingId) ?? null;
-}
-
-/** Test seam. */
-export function resetListings() {
-  published.clear();
-}
+export { findListingById as getListing };

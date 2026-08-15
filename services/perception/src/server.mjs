@@ -14,6 +14,8 @@ import {
   formatLocationRejected,
   formatPriceMeasured,
   formatLocationRequest,
+  formatBuyerPaid,
+  formatSellerPaid,
   isOptOutEvent,
   PHOTO_FAILED,
   sendLinqReply
@@ -21,6 +23,10 @@ import {
 import { recordItem, setCondition, setLocation, startTurn } from "./sessions.mjs";
 import { DEFAULT_RADIUS_MILES, lookupZip } from "./geo.mjs";
 import { publishListing, queryListings, setMeasuredPrice } from "./listings.mjs";
+import { handleDealMessage } from "./deal-flow.mjs";
+import { initStore, markOrderPaid, findOrderById, findListingById, updateListing, storeBackend } from "./store.mjs";
+import { isVerifiedStripeWebhook } from "./stripe.mjs";
+import { getDeal } from "./deals.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -144,6 +150,31 @@ async function sendIdentificationResult(inbound, eventId) {
   }
 }
 
+/**
+ * Tells both sides a sale settled. Neither message is worth failing the webhook
+ * over: the money has already moved, and Stripe would retry a non-200.
+ */
+async function notifyBothSidesPaid(order) {
+  const listing = await findListingById(order.listingId);
+  const deal = { listingName: listing?.name ?? "your item", agreedPrice: (order.amountCents / 100).toFixed(0), pickupAddress: order.pickupAddress, pickupTime: order.pickupTime };
+
+  const messages = [
+    { chatId: order.buyerChatId, text: formatBuyerPaid(deal), key: `paid-${order.id}-buyer` },
+    { chatId: listing?.sellerChatId, text: formatSellerPaid(deal, order.sellerPayoutCents), key: `paid-${order.id}-seller` }
+  ];
+
+  for (const message of messages) {
+    if (!message.chatId) continue;
+    try {
+      await sendLinqReply({ chatId: message.chatId, text: message.text, idempotencyKey: message.key });
+    } catch (error) {
+      console.log(JSON.stringify({ event: "linq.paid_notice_failed", chat: message.chatId, error: error.message }));
+    }
+  }
+
+  if (listing) await updateListing(listing.id, { status: "sold" });
+}
+
 async function handleLinqWebhook(request, response) {
   const rawBody = await readRawBody(request);
   if (!isVerifiedLinqWebhook(request, rawBody)) return json(response, 401, { error: "Invalid Linq webhook signature." });
@@ -158,6 +189,16 @@ async function handleLinqWebhook(request, response) {
   const session = chatId && !isOptOutEvent(event) ? startTurn(chatId) : { isNewSession: true, hasHistory: false, items: [] };
 
   const inbound = describeInboundLinqMessage(event, session);
+  if (!inbound || inbound.optedOut) {
+    return json(response, 200, { status: inbound?.optedOut ? "opted_out" : "processed" });
+  }
+
+  // A buyer naming a listing code, or either side answering mid-deal, is
+  // handled before the selling path so a deal is never mistaken for a new item.
+  if (!inbound.photo) {
+    const deal = await handleDealMessage({ chatId: inbound.chatId, text: inbound.text, eventId: event.event_id });
+    if (deal.handled) return json(response, 200, { status: deal.status });
+  }
 
   // The seller answered the condition question: record it and ask where it is.
   if (inbound?.condition && !inbound.optedOut) {
@@ -259,6 +300,32 @@ const server = createServer(async (request, response) => {
     }
 
     /**
+     * Stripe settlement. Signature-verified, because an unverified payment
+     * confirmation would let anyone take an item without paying.
+     */
+    if (request.method === "POST" && url.pathname === "/webhooks/stripe") {
+      const rawBody = await readRawBody(request);
+      const verified = await isVerifiedStripeWebhook(
+        request.headers["stripe-signature"],
+        rawBody,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+      if (!verified) return json(response, 401, { error: "Invalid Stripe signature." });
+
+      const event = JSON.parse(rawBody);
+      if (event.type !== "checkout.session.completed") return json(response, 200, { status: "ignored" });
+
+      const orderId = event.data?.object?.client_reference_id;
+      const order = orderId ? await findOrderById(orderId) : null;
+      if (!order) return json(response, 200, { status: "unknown_order" });
+      if (order.status === "paid") return json(response, 200, { status: "already_paid" });
+
+      await markOrderPaid(order.id);
+      await notifyBothSidesPaid(order);
+      return json(response, 200, { status: "paid" });
+    }
+
+    /**
      * Records a measured price from the pricing study.
      *
      * Terac is MCP-only, so nothing here calls it: whoever runs the study posts
@@ -275,7 +342,7 @@ const server = createServer(async (request, response) => {
       const price = Number(body.price);
       if (!Number.isFinite(price) || price <= 0) return json(response, 400, { error: "Send a positive numeric price." });
 
-      const listing = setMeasuredPrice(pricing[1], price, {
+      const listing = await setMeasuredPrice(pricing[1], price, {
         floorPrice: Number.isFinite(Number(body.floorPrice)) ? Number(body.floorPrice) : null,
         studyId: body.studyId ?? null
       });
@@ -301,10 +368,10 @@ const server = createServer(async (request, response) => {
       const zip = url.searchParams.get("zip");
       const radiusMiles = Number(url.searchParams.get("radius") ?? DEFAULT_RADIUS_MILES);
 
-      if (!zip) return json(response, 200, queryListings({ radiusMiles }));
+      if (!zip) return json(response, 200, await queryListings({ radiusMiles }));
       try {
         const origin = await lookupZip(zip);
-        return json(response, 200, queryListings({ origin, radiusMiles }));
+        return json(response, 200, await queryListings({ origin, radiusMiles }));
       } catch (error) {
         return json(response, 400, { error: error.message });
       }
@@ -319,4 +386,6 @@ const server = createServer(async (request, response) => {
 });
 
 const port = Number(process.env.PORT || 3000);
+await initStore();
+console.log(JSON.stringify({ event: "store.ready", backend: storeBackend() }));
 server.listen(port, () => console.log(`Photo identification is running at http://localhost:${server.address().port}`));
