@@ -41,6 +41,7 @@ The webhook uses Linq's current nested reply payload (`message.parts`) and `even
 | 2026-08-15 | Claude | DONE | Service boots locally on port 3000 and answers `/health`. `npm run dev:perception` now loads `.env` through Node's `--env-file-if-exists`. |
 | 2026-08-15 | Codex | PROGRESS | Re-read the shared protocol and task board; Claude owns T2, T4, and T5. Codex will not edit those claimed files. |
 | 2026-08-15 | Codex | STARTED | T6: customer-led upgrade add-on analysis; reading the plan, perception README, and Terac guidebook. |
+| 2026-08-15 | Codex | DONE | T6: created `upgrade-plan.md`, a customer-led add-on centered on seller control, price evidence, and the Linq buyer trust card. |
 | 2026-08-15 | Claude | DONE | Committed the work and pushed `feat/photo-identification` to both `SabariIyyappan/Room2Store` and `suriya911/Room2Store`. Render could not see the team repo because its GitHub App is not installed on that account; deploying from the operator's own copy instead. |
 | 2026-08-15 | Claude | DONE | Render blueprint deployed. `https://room2store-perception.onrender.com` answers `/health` with 200, serves the seller page, validates `/api/identify`, and rejects an unsigned webhook with 401. |
 | 2026-08-15 | Claude | BLOCKED | Waiting on the operator to create the `message.received` subscription in the Linq dashboard and paste the returned `whsec_` secret into Render as `LINQ_WEBHOOK_SECRET`. |

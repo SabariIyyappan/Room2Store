@@ -10,6 +10,7 @@ import {
   fetchLinqMediaAsDataUrl,
   formatIdentificationReply,
   isOptOutEvent,
+  PHOTO_FAILED,
   sendLinqReply
 } from "./linq.mjs";
 import { recordItem, startTurn } from "./sessions.mjs";
@@ -18,6 +19,8 @@ const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
 const items = new Map();
 const processedWebhookEvents = new Set();
+// Keeps in-flight identifications referenced so they are not lost mid-flight.
+const pendingIdentifications = new Set();
 const mimeTypes = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
 
 function json(response, status, body) {
@@ -75,7 +78,14 @@ async function serveFile(pathname, response) {
  * Downloads the inbound photo and identifies it. A provider failure must not
  * silently become a fabricated match, so the buyer gets the plain acknowledgement.
  */
-async function describePhotoReply(inbound) {
+/**
+ * Identifies the photo and sends the result as its own message.
+ *
+ * Runs after the webhook has already been acknowledged, so a slow vision call
+ * cannot make Linq time out and retry the delivery.
+ */
+async function sendIdentificationResult(inbound, eventId) {
+  let text = PHOTO_FAILED;
   try {
     const imageDataUrl = await fetchLinqMediaAsDataUrl(inbound.photo);
     const identification = await identifyPhoto({ imageName: inbound.photo.name, imageDataUrl });
@@ -85,10 +95,16 @@ async function describePhotoReply(inbound) {
       modelNumber: identification.vision?.model_number,
       status: identification.needsModelNumber ? "awaiting_model_number" : "identified"
     });
-    return formatIdentificationReply(identification);
+    text = formatIdentificationReply(identification);
   } catch (error) {
     console.log(JSON.stringify({ event: "linq.photo_identification_failed", error: error.message }));
-    return inbound.reply;
+  }
+
+  try {
+    // A distinct key from the acknowledgement, or Linq treats it as a repeat.
+    await sendLinqReply({ chatId: inbound.chatId, text, idempotencyKey: `${eventId}-result` });
+  } catch (error) {
+    console.log(JSON.stringify({ event: "linq.result_send_failed", error: error.message }));
   }
 }
 
@@ -106,11 +122,21 @@ async function handleLinqWebhook(request, response) {
   const session = chatId && !isOptOutEvent(event) ? startTurn(chatId) : { isNewSession: true, hasHistory: false, items: [] };
 
   const inbound = describeInboundLinqMessage(event, session);
-  if (inbound?.reply && !inbound.optedOut) {
-    const text = inbound.photo ? await describePhotoReply(inbound) : inbound.reply;
-    await sendLinqReply({ chatId: inbound.chatId, text, idempotencyKey: event.event_id });
+  if (!inbound?.reply || inbound.optedOut) {
+    return json(response, 200, { status: inbound?.optedOut ? "opted_out" : "processed" });
   }
-  return json(response, 200, { status: inbound?.optedOut ? "opted_out" : "processed" });
+
+  await sendLinqReply({ chatId: inbound.chatId, text: inbound.reply, idempotencyKey: event.event_id });
+
+  if (!inbound.photo) return json(response, 200, { status: "processed" });
+
+  // Acknowledged already; the identification is sent as a second message so a
+  // slow vision call never holds the webhook response open.
+  const finished = sendIdentificationResult(inbound, event.event_id);
+  pendingIdentifications.add(finished);
+  finished.finally(() => pendingIdentifications.delete(finished));
+
+  return json(response, 200, { status: "identifying" });
 }
 
 const server = createServer(async (request, response) => {

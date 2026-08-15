@@ -26,7 +26,12 @@ const SYSTEM_PROMPT =
   "engraving on the item. If no model number or serial number is visible " +
   `anywhere in the image, set model_number to the literal string "${MODEL_UNKNOWN}". ` +
   "confidence is 0.0-1.0, your certainty on brand+category identification. " +
-  "Never guess a model number that is not literally visible as text in the image.";
+  "Never guess a model number that is not literally visible as text in the image. " +
+  "product_name must always be filled in with a short plain-English name a " +
+  "resale listing would use, including colour or material when they are obvious " +
+  '— for example "black mesh office chair" or "white ceramic table lamp". Never ' +
+  'return an empty product_name, and never return "unknown" for it. Set brand to ' +
+  '"Unknown" when no brand is visible; that is expected and is not a failure.';
 
 export function isVisionConfigured() {
   return Boolean(process.env.PIONEER_API_KEY);

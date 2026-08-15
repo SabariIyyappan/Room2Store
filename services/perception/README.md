@@ -41,10 +41,29 @@ With neither variable set the service runs in `demo-fallback` mode, which matche
 `POST /webhooks/linq` verifies the `webhook-id` / `webhook-timestamp` / `webhook-signature` triple against `LINQ_WEBHOOK_SECRET`, rejects replays by `event_id`, and answers in the same chat:
 
 - text → the Room2Store welcome
-- photo → media is downloaded, identified, and the reply names the product, or asks for the model number when none was legible
+- photo → **two messages**: an immediate "Got it — looking at your photo now", then the identification in its own message once vision returns
 - `STOP` and the other opt-out keywords → no reply at all
 
-If identification fails the buyer gets the plain "photo received" acknowledgement, never an invented match.
+The webhook is acknowledged before the vision call starts, so a slow identification cannot make Linq time out and redeliver the event. The result message uses `${event_id}-result` as its idempotency key, since reusing the acknowledgement's key would make Linq drop it as a repeat.
+
+Replies read like a marketplace listing, and a missing brand or model never blocks one:
+
+```
+Looks like a used Sony WH-1000XM5.
+Model number on it: WH-1000XM5
+
+What condition is it in — new, excellent, good, or fair?
+```
+
+```
+Looks like a used black mesh office chair.
+
+What condition is it in — new, excellent, good, or fair?
+
+If you can find a model or part number on a label, send it too and I can price it more accurately.
+```
+
+The model asks for a plain resale name including colour or material, so an unbranded item still gets something usable rather than "unknown". A model number is offered as an optional accuracy improvement in chat — unlike the web flow, which requires it before confirming. If identification fails entirely the seller is told plainly and asked what the item is; nothing is ever invented.
 
 ## Conversation sessions
 

@@ -78,6 +78,17 @@ async function startService(stubPort) {
   return { child, port };
 }
 
+/** Polls until the predicate returns something truthy; the result message arrives out of band. */
+async function waitFor(predicate, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = predicate();
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for the follow-up message.");
+}
+
 function postWebhook(port, event, headers) {
   const body = JSON.stringify(event);
   return fetch(`http://127.0.0.1:${port}/webhooks/linq`, {
@@ -128,7 +139,7 @@ test("Linq webhook end to end", async (t) => {
     assert.equal(state.replies.length, before);
   });
 
-  await t.test("identifies an inbound photo and answers with the product", async () => {
+  await t.test("acknowledges a photo immediately, then sends the identification", async () => {
     const response = await postWebhook(port, {
       event_id: "evt-photo",
       event_type: "message.received",
@@ -139,9 +150,16 @@ test("Linq webhook end to end", async (t) => {
       }
     });
     assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "identifying" });
+
+    // The acknowledgement is already sent by the time the webhook answers.
+    assert.match(state.replies.at(-1), /Got it — looking at your photo now\./);
+
+    const result = await waitFor(() => state.replies.find((reply) => reply.includes("Looks like a used")));
+    assert.match(result, /Looks like a used Sony WH-1000XM5\./);
+    assert.match(result, /Model number on it: WH-1000XM5/);
+    assert.match(result, /What condition is it in/);
     assert.deepEqual(state.visionCalls, ["claude-haiku-4-5"]);
-    assert.match(state.replies.at(-1), /Sony WH-1000XM5/);
-    assert.match(state.replies.at(-1), /Model: WH-1000XM5/);
   });
 
   await t.test("lists the photographed item back when the seller replies 1", async () => {

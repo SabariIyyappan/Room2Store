@@ -10,7 +10,7 @@ Read [AGENTS.md](AGENTS.md) and update this board plus `status.md` before and af
 | T3 | Public endpoint and Linq subscription | Claude | In progress | Deployed on Render at `https://room2store-perception.onrender.com`; `render.yaml`, `scripts/subscribe-webhook.mjs` | Deployed instead of tunnelling, since Render is a sponsor track and the URL is permanent. Remaining: create the `message.received` subscription and set the real `LINQ_WEBHOOK_SECRET`. |
 | T4 | Photo received → real product recognition | Claude | Done | `services/perception/src/vision.mjs`, `catalog.mjs`, `public/app.js`; `test/vision.test.mjs`, `test/catalog-vision.test.mjs` | Pioneer vision with the primary/fallback/hard-case chain, `MODEL_UNKNOWN` manual-input path, and Linq media download into the same identifier. Needs a real `PIONEER_API_KEY` for a live call. |
 | T5 | Listing / pricing / compliance continuation | Claude | In progress | `services/compliance/src/verdict.mjs`, `test/verdict.test.mjs`; naive price now reports `needs_comps` | Compliance verdict and deploy gate are in place and returned from the confirm endpoint. Next: comps lookup for `compsQuery`, then the Terac study. |
-| T6 | Customer-led upgrade add-on plan | Codex | In progress | Read-only analysis of `plan.md`, perception README, and Terac guidebook | Produce a prioritized add-on plan without rewriting the core build plan. |
+| T6 | Customer-led upgrade add-on plan | Codex | Done | `upgrade-plan.md`; reviewed `plan.md`, perception README, and Terac guidebook | Use the P0 Sell Brief, Price Evidence, and Buyer Trust Card as the next product layer. |
 
 ## File ownership
 
