@@ -26,6 +26,22 @@ async function startStub(state) {
       return response.end(PIXEL);
     }
 
+    // Stands in for the public ZIP geocoder.
+    if (request.url.startsWith("/zip/")) {
+      const zip = request.url.slice("/zip/".length);
+      const places = {
+        "94107": { latitude: "37.7749", longitude: "-122.4194", "place name": "San Francisco", "state abbreviation": "CA" },
+        "94612": { latitude: "37.8044", longitude: "-122.2712", "place name": "Oakland", "state abbreviation": "CA" },
+        "10001": { latitude: "40.7128", longitude: "-74.0060", "place name": "New York", "state abbreviation": "NY" }
+      };
+      if (!places[zip]) {
+        response.writeHead(404, { "content-type": "application/json" });
+        return response.end("{}");
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      return response.end(JSON.stringify({ "post code": zip, places: [places[zip]] }));
+    }
+
     let body = "";
     for await (const chunk of request) body += chunk;
 
@@ -61,7 +77,8 @@ async function startService(stubPort) {
       LINQ_API_KEY: "linq_test_key",
       LINQ_API_URL: `http://127.0.0.1:${stubPort}/v3`,
       PIONEER_API_KEY: "pio_sk_test",
-      PIONEER_BASE_URL: `http://127.0.0.1:${stubPort}/v1`
+      PIONEER_BASE_URL: `http://127.0.0.1:${stubPort}/v1`,
+      ZIP_API_URL: `http://127.0.0.1:${stubPort}/zip`
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -164,20 +181,46 @@ test("Linq webhook end to end", async (t) => {
     assert.deepEqual(state.visionCalls, ["google/gemini-3.1-flash-lite"]);
   });
 
-  await t.test("answering the condition produces the listing draft", async () => {
+  await t.test("answering the condition asks where the item is", async () => {
     const response = await postWebhook(port, {
       event_id: "evt-condition",
       event_type: "message.received",
       data: { chat: { id: "chat-1" }, parts: [{ type: "text", value: "good" }] }
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { status: "listed" });
+    assert.deepEqual(await response.json(), { status: "awaiting_location" });
+    assert.match(state.replies.at(-1), /What ZIP code is it in for pickup/);
+  });
 
-    const draft = state.replies.at(-1);
-    assert.match(draft, /Here is your listing:/);
-    assert.match(draft, /Sony WH-1000XM5/);
-    assert.match(draft, /Condition: good/);
-    assert.match(draft, /Price: \$25 \(placeholder/);
+  await t.test("answering with a ZIP publishes the listing", async () => {
+    const response = await postWebhook(port, {
+      event_id: "evt-zip",
+      event_type: "message.received",
+      data: { chat: { id: "chat-1" }, parts: [{ type: "text", value: "94107" }] }
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "published" });
+
+    const published = state.replies.at(-1);
+    assert.match(published, /Your listing is live:/);
+    assert.match(published, /Sony WH-1000XM5/);
+    assert.match(published, /Pickup: San Francisco, CA/);
+    assert.match(published, /Price: being measured now/);
+  });
+
+  await t.test("the published listing is findable inside the radius and not outside it", async () => {
+    const near = await fetch(`http://127.0.0.1:${port}/api/listings?zip=94612&radius=20`);
+    const nearBody = await near.json();
+    assert.equal(nearBody.listings.length, 1, "Oakland is about 8 miles from the listing");
+    assert.ok(nearBody.listings[0].distanceMiles < 20);
+
+    const far = await fetch(`http://127.0.0.1:${port}/api/listings?zip=10001&radius=100`);
+    assert.equal((await far.json()).listings.length, 0, "New York is far outside 100 miles");
+  });
+
+  await t.test("an unknown ZIP is rejected rather than guessed", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/listings?zip=00000`);
+    assert.equal(response.status, 400);
   });
 
   await t.test("lists the photographed item back when the seller replies 1", async () => {

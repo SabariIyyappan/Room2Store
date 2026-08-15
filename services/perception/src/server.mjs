@@ -9,12 +9,16 @@ import {
   describeInboundLinqMessage,
   fetchLinqMediaAsDataUrl,
   formatIdentificationReply,
-  formatListingDraft,
+  formatListingPublished,
+  formatLocationRejected,
+  formatLocationRequest,
   isOptOutEvent,
   PHOTO_FAILED,
   sendLinqReply
 } from "./linq.mjs";
-import { recordItem, setCondition, startTurn } from "./sessions.mjs";
+import { recordItem, setCondition, setLocation, startTurn } from "./sessions.mjs";
+import { DEFAULT_RADIUS_MILES, lookupZip } from "./geo.mjs";
+import { publishListing, queryListings } from "./listings.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -149,12 +153,35 @@ async function handleLinqWebhook(request, response) {
 
   const inbound = describeInboundLinqMessage(event, session);
 
-  // The seller answered the condition question: complete the item and send the draft.
+  // The seller answered the condition question: record it and ask where it is.
   if (inbound?.condition && !inbound.optedOut) {
     const item = setCondition(inbound.chatId, inbound.condition);
     if (item) {
-      await sendLinqReply({ chatId: inbound.chatId, text: formatListingDraft(item), idempotencyKey: event.event_id });
-      return json(response, 200, { status: "listed" });
+      await sendLinqReply({ chatId: inbound.chatId, text: formatLocationRequest(item), idempotencyKey: event.event_id });
+      return json(response, 200, { status: "awaiting_location" });
+    }
+  }
+
+  // The seller answered with a ZIP: resolve it, publish, and confirm.
+  if (inbound?.zip && !inbound.optedOut) {
+    let location;
+    try {
+      location = await lookupZip(inbound.zip);
+    } catch (error) {
+      console.log(JSON.stringify({ event: "zip.lookup_failed", zip: inbound.zip, error: error.message }));
+      await sendLinqReply({ chatId: inbound.chatId, text: formatLocationRejected(inbound.zip), idempotencyKey: event.event_id });
+      return json(response, 200, { status: "zip_rejected" });
+    }
+
+    const item = setLocation(inbound.chatId, location);
+    if (item) {
+      await publishListing(item);
+      await sendLinqReply({
+        chatId: inbound.chatId,
+        text: formatListingPublished(item, { webUrl: process.env.PUBLIC_WEB_URL }),
+        idempotencyKey: event.event_id
+      });
+      return json(response, 200, { status: "published" });
     }
   }
 
@@ -207,6 +234,20 @@ const server = createServer(async (request, response) => {
       items.delete(confirmation[1]);
       const verdict = reviewItem({ item });
       return json(response, 201, { item, verdict });
+    }
+
+    // Buyer-facing listing search. No auth: these are public listings.
+    if (request.method === "GET" && url.pathname === "/api/listings") {
+      const zip = url.searchParams.get("zip");
+      const radiusMiles = Number(url.searchParams.get("radius") ?? DEFAULT_RADIUS_MILES);
+
+      if (!zip) return json(response, 200, queryListings({ radiusMiles }));
+      try {
+        const origin = await lookupZip(zip);
+        return json(response, 200, queryListings({ origin, radiusMiles }));
+      } catch (error) {
+        return json(response, 400, { error: error.message });
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { status: "ok" });

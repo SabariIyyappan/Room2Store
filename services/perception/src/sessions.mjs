@@ -38,6 +38,7 @@ export function startTurn(chatId, now = Date.now()) {
     hasHistory: chat.items.length > 0,
     items: [...chat.items],
     awaitingCondition: Boolean(itemAwaitingCondition(chatId)),
+    awaitingLocation: Boolean(itemAwaitingLocation(chatId)),
     idleMs
   };
 }
@@ -63,12 +64,31 @@ export function itemAwaitingCondition(chatId) {
   return last && !last.condition ? last : null;
 }
 
-/** Attaches the condition the seller replied with, completing the item. */
+/** Attaches the condition the seller replied with. The ZIP is asked for next. */
 export function setCondition(chatId, condition) {
   const item = itemAwaitingCondition(chatId);
   if (!item) return null;
   item.condition = condition;
-  item.status = "listed_draft";
+  item.status = "awaiting_location";
+  return item;
+}
+
+/** The most recent item that has a condition but no pickup location yet. */
+export function itemAwaitingLocation(chatId) {
+  const items = getChat(chatId).items;
+  const last = items[items.length - 1];
+  return last && last.condition && !last.location ? last : null;
+}
+
+/**
+ * Attaches the pickup location, which completes the item. The listing cannot
+ * be published without it: a buyer radius filter has nothing to filter on.
+ */
+export function setLocation(chatId, location) {
+  const item = itemAwaitingLocation(chatId);
+  if (!item) return null;
+  item.location = location;
+  item.status = "ready_to_publish";
   return item;
 }
 

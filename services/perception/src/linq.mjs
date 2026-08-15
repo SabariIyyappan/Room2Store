@@ -1,4 +1,5 @@
 import { buildProductTitle } from "./vision.mjs";
+import { isZipCode, normalizeZip } from "./geo.mjs";
 
 const LINQ_API_URL = process.env.LINQ_API_URL || "https://api.linqapp.com/api/partner/v3";
 
@@ -30,7 +31,6 @@ const MAX_MEDIA_BYTES = 5_000_000;
 
 const OPT_OUT = /^(STOP|UNSUBSCRIBE|OPTOUT|CANCEL|END|QUIT)$/i;
 const CONDITION = /^(new|like new|excellent|good|fair|used)\b/i;
-const PLACEHOLDER_PRICE = "$25";
 const ASK_FOR_ITEMS = /^(1|OLD|ITEMS|MY ITEMS|OLD ITEMS|PRODUCTS|OLD PRODUCTS|HISTORY|STATUS)$/i;
 
 const WELCOME = "Welcome to Room2Store!\n\nSend a photo of anything you want to sell. No caption needed.\n\nAdd 'sell it for me' or any condition details, and I will take it from there.";
@@ -99,6 +99,11 @@ export function describeInboundLinqMessage(event, session = { isNewSession: true
     return { ...base, condition: normalizeCondition(text) };
   }
 
+  // Likewise a ZIP: five digits mean nothing unless an item is waiting for one.
+  if (session.awaitingLocation && isZipCode(text)) {
+    return { ...base, zip: normalizeZip(text) };
+  }
+
   // The returning-seller option is only offered to a chat that actually has
   // items; a first-time sender never sees a prompt that would do nothing.
   if (session.isNewSession) {
@@ -135,20 +140,42 @@ function normalizeCondition(text) {
   return word === "like new" ? "new" : word === "used" ? "good" : word;
 }
 
-/**
- * The finished listing draft. The price is a placeholder until the Terac study
- * measures a real one, and says so, so nobody mistakes it for a measured price.
- */
-export function formatListingDraft(item) {
+/** Asked once the condition is known, because a buyer radius needs somewhere to measure from. */
+export function formatLocationRequest(item) {
   return [
-    "Here is your listing:",
+    `Got it — ${item.name}, ${item.condition} condition.`,
+    "",
+    "What ZIP code is it in for pickup? Buyers nearby will see it first."
+  ].join("\n");
+}
+
+/**
+ * The published listing. No price is quoted here: a price only exists once the
+ * pricing study has measured one, and inventing a number in the meantime is the
+ * exact thing this product claims not to do.
+ */
+export function formatListingPublished(item, { webUrl } = {}) {
+  const place = item.location?.city ? `${item.location.city}, ${item.location.state}` : item.location?.zip;
+  const lines = [
+    "Your listing is live:",
     "",
     item.name,
     `Condition: ${item.condition}`,
-    `Price: ${PLACEHOLDER_PRICE} (placeholder — the real price comes from the pricing study)`,
+    `Pickup: ${place}`,
     "",
-    "Send another photo to add another item."
-  ].join("\n");
+    item.measuredPrice
+      ? `Price: $${item.measuredPrice}`
+      : "Price: being measured now. I will text you the moment the pricing study lands."
+  ];
+
+  if (webUrl) lines.push("", `See it here: ${webUrl}`);
+  lines.push("", "Send another photo to add another item.");
+  return lines.join("\n");
+}
+
+/** Sent when the ZIP could not be resolved. */
+export function formatLocationRejected(zip) {
+  return `I could not find ZIP ${zip}. Send the five-digit ZIP code where the item can be picked up.`;
 }
 
 function isUnknown(value) {
