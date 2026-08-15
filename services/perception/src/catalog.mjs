@@ -72,13 +72,34 @@ function visionToCandidate(vision) {
   };
 }
 
+/**
+ * Tries each configured vision provider in turn and reports which one answered.
+ * Every failure is carried into the final error so the real cause survives.
+ */
+async function identifyWithAnyProvider(imageDataUrl) {
+  const providers = [
+    { source: "pioneer-vision", enabled: isVisionConfigured(), run: identifyProductWithFallback },
+    { source: "gemini-vision", enabled: isGeminiConfigured(), run: identifyWithGemini }
+  ].filter((provider) => provider.enabled);
+
+  const errors = [];
+  for (const provider of providers) {
+    try {
+      return { vision: await provider.run(imageDataUrl), source: provider.source };
+    } catch (error) {
+      errors.push(`${provider.source}: ${error.message}`);
+    }
+  }
+
+  throw new Error(errors.join(" || "));
+}
+
 export async function identifyPhoto({ imageName, imageDataUrl }) {
-  // Pioneer first: it hosts Gemini and the hackathon credits live there.
-  // GEMINI_API_KEY is the direct-to-Google escape hatch.
+  // Pioneer first (the hackathon credits live there), then direct Google. A
+  // provider outage or a missing plan on one must not take identification down.
   if (isVisionConfigured() || isGeminiConfigured()) {
-    const usePioneer = isVisionConfigured();
-    const vision = usePioneer ? await identifyProductWithFallback(imageDataUrl) : await identifyWithGemini(imageDataUrl);
-    const identification = buildIdentification([visionToCandidate(vision)], usePioneer ? "pioneer-vision" : "gemini-vision");
+    const { vision, source } = await identifyWithAnyProvider(imageDataUrl);
+    const identification = buildIdentification([visionToCandidate(vision)], source);
     return {
       ...identification,
       vision,
