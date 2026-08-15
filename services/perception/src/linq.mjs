@@ -173,6 +173,33 @@ export function formatListingPublished(item, { webUrl } = {}) {
   return lines.join("\n");
 }
 
+const VETO_REASONS = {
+  prohibited_weapon: "weapons cannot be listed",
+  prohibited_car_seat: "used car seats and booster seats cannot be resold safely",
+  prohibited_medication: "medication and supplements cannot be listed",
+  prohibited_recalled: "recalled products cannot be listed",
+  unsafe_pickup_address: "a street address cannot appear in a public listing",
+  contact_not_opted_in: "this contact has not opted in"
+};
+
+/**
+ * Sent instead of a listing when compliance refuses. It names the reason: a
+ * seller told only "no" will just send the same item again.
+ */
+export function formatListingVetoed(item, verdict) {
+  const explained = verdict.rulesTriggered
+    .map((rule) => VETO_REASONS[rule] ?? (rule.startsWith("excluded_object:") ? "you asked me to leave this one out" : null))
+    .filter(Boolean);
+
+  return [
+    `I cannot list the ${item.name}.`,
+    "",
+    explained.length > 0 ? `Reason: ${explained[0]}.` : "It did not pass the safety check.",
+    "",
+    "Send a photo of something else and I will take it from there."
+  ].join("\n");
+}
+
 /** Sent to the seller once the pricing study has measured a real number. */
 export function formatPriceMeasured(listing) {
   const lines = [

@@ -49,6 +49,8 @@ export function recordItem(chatId, item, now = Date.now()) {
   chat.items.push({
     name: item.name ?? "Unnamed item",
     modelNumber: item.modelNumber ?? null,
+    category: item.category ?? "other",
+    photoUrl: item.photoUrl ?? null,
     status: item.status ?? "identified",
     condition: null,
     naivePrice: item.naivePrice ?? null,

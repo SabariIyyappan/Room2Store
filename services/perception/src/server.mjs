@@ -4,12 +4,13 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { confirmIdentification, identifyPhoto } from "./catalog.mjs";
-import { reviewItem } from "../../compliance/src/verdict.mjs";
+import { canDeploy, reviewItem } from "../../compliance/src/verdict.mjs";
 import {
   describeInboundLinqMessage,
   fetchLinqMediaAsDataUrl,
   formatIdentificationReply,
   formatListingPublished,
+  formatListingVetoed,
   formatLocationRejected,
   formatPriceMeasured,
   formatLocationRequest,
@@ -124,6 +125,10 @@ async function sendIdentificationResult(inbound, eventId) {
     recordItem(inbound.chatId, {
       name: identification.candidates[0]?.name,
       modelNumber: identification.vision?.model_number,
+      category: identification.vision?.category,
+      // Linq's persistent attachment URLs are public and long-lived, so the
+      // storefront can show the seller's own photo rather than a placeholder.
+      photoUrl: inbound.photo?.url ?? null,
       status: identification.needsModelNumber ? "awaiting_model_number" : "identified"
     });
     text = formatIdentificationReply(identification);
@@ -176,6 +181,20 @@ async function handleLinqWebhook(request, response) {
 
     const item = setLocation(inbound.chatId, location);
     if (item) {
+      // The compliance gate runs before anything is published, not after. A
+      // veto has to stop the listing existing at all, or it is decorative.
+      const verdict = reviewItem({ item, listingCopy: `${item.name} ${item.condition}` });
+      if (!canDeploy(verdict)) {
+        item.status = "vetoed";
+        console.log(JSON.stringify({ event: "compliance.vetoed", item: item.name, rules: verdict.rulesTriggered }));
+        await sendLinqReply({
+          chatId: inbound.chatId,
+          text: formatListingVetoed(item, verdict),
+          idempotencyKey: event.event_id
+        });
+        return json(response, 200, { status: "vetoed", verdict });
+      }
+
       // Remembered so the seller can be texted when the price is measured.
       item.sellerChatId = inbound.chatId;
       await publishListing(item);
