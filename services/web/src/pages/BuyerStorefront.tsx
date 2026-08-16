@@ -56,6 +56,10 @@ export default function BuyerStorefront() {
     () => listings.filter((listing) => listing.priceStatus === "measured").length,
     [listings]
   );
+  const estimatedCount = useMemo(
+    () => listings.filter((listing) => listing.priceStatus === "estimated").length,
+    [listings]
+  );
 
   return (
     <div className="min-h-screen bg-white text-zinc-900">
@@ -110,12 +114,19 @@ export default function BuyerStorefront() {
                 : `${listings.length} items listed · enter a ZIP to filter by distance`}
             </div>
           </div>
-          {measuredCount > 0 && (
-            <div className="ml-auto flex items-center gap-1.5 text-xs text-zinc-700 bg-white border border-zinc-200 rounded-full px-3 py-1.5">
-              <BadgeCheck className="w-4 h-4 text-[#7c3aed]" />
-              <span className="font-semibold">{measuredCount}</span> priced by real people
-            </div>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {measuredCount > 0 && (
+              <div className="flex items-center gap-1.5 text-xs text-zinc-700 bg-white border border-zinc-200 rounded-full px-3 py-1.5">
+                <BadgeCheck className="w-4 h-4 text-[#7c3aed]" />
+                <span className="font-semibold">{measuredCount}</span> priced by real people
+              </div>
+            )}
+            {estimatedCount > 0 && (
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500 bg-white border border-zinc-200 rounded-full px-3 py-1.5">
+                <span className="font-semibold">{estimatedCount}</span> market estimate{estimatedCount === 1 ? "" : "s"}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -214,7 +225,10 @@ function smsHref(listing: Listing) {
 }
 
 function ProductCard({ listing }: { listing: Listing }) {
-  const priced = listing.priceStatus === "measured" && listing.price != null;
+  // An estimated price is still a price: the item is buyable, it is just
+  // labelled differently from one a panel actually measured.
+  const priced = listing.price != null && listing.priceStatus !== "being_measured";
+  const measured = listing.priceStatus === "measured";
 
   return (
     <div className="relative bg-white border border-zinc-200 rounded-lg overflow-hidden transition-all hover:border-[#7c3aed] hover:shadow-md">
@@ -240,7 +254,20 @@ function ProductCard({ listing }: { listing: Listing }) {
             says so rather than showing a number nobody stands behind. */}
         <div className="mb-1">
           {priced ? (
-            <span className="text-[20px] font-bold font-mono tabular-nums">${listing.price}</span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-[20px] font-bold font-mono tabular-nums">${listing.price}</span>
+              <span
+                className={cn(
+                  "text-[10px] font-medium px-1.5 py-0.5 rounded-full border",
+                  measured
+                    ? "border-[#7c3aed]/30 bg-[#7c3aed]/10 text-[#7c3aed]"
+                    : "border-zinc-200 bg-zinc-50 text-zinc-500"
+                )}
+                title={measured ? "Priced by a real panel" : "Market estimate, not measured on a panel"}
+              >
+                {measured ? "measured" : "estimate"}
+              </span>
+            </div>
           ) : (
             <span className="text-[13px] font-medium text-zinc-500">Price being measured</span>
           )}

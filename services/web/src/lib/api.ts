@@ -34,7 +34,8 @@ export type Listing = {
   /** null until the pricing study has measured one. Never invent a number here. */
   price: number | null;
   floorPrice?: number | null;
-  priceStatus: "being_measured" | "measured";
+  /** estimated = a model guess; measured = a real panel priced it. */
+  priceStatus: "being_measured" | "estimated" | "measured";
   location: ListingLocation;
   publishedAt: string;
   distanceMiles?: number;
