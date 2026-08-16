@@ -267,11 +267,9 @@ export async function updateListing(id, changes) {
   if (sets.length === 0) return findListingById(id);
 
   values.push(id);
-  const { rows } = await pool.query(
-    `UPDATE listings SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING ${LISTING_COLUMNS}`,
-    values
-  );
-  return rows[0] ? rowToListing(rows[0]) : null;
+  await pool.query(`UPDATE listings SET ${sets.join(", ")} WHERE id = $${values.length}`, values);
+  // Re-read through the joined query so the seller chat id comes back with it.
+  return findListingById(id);
 }
 
 export async function insertOrder(order) {
