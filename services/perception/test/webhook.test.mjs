@@ -249,7 +249,8 @@ test("Linq webhook end to end", async (t) => {
     const notice = state.replies.at(-1);
     // No panel measured this, so it must not claim one did.
     assert.match(notice, /Your price is set/);
-    assert.doesNotMatch(notice, /measured on/);
+    assert.match(notice, /not measured on a panel yet/);
+    assert.doesNotMatch(notice, /measured on \d+ people/);
     assert.match(notice, /Price: \$145/);
     assert.match(notice, /not accept below \$118/);
   });

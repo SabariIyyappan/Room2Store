@@ -20,7 +20,12 @@ const PROMPT =
   "retail depending on condition and how fast the category loses value. " +
   "floor_price is the least a seller should accept, strictly below asking_price, " +
   "usually 75-85% of it. All whole dollars in USD. Price the actual item named, " +
-  "using what you know about that brand and model; do not return a generic number.";
+  "using what you know about that brand and model; do not return a generic number. " +
+  "Condition drives the discount off retail and must visibly change the price: " +
+  "new = 70-85% of retail, excellent = 55-70%, good = 40-55%, fair = 25-40%, " +
+  "unknown = treat as good. Electronics and computers fall faster than furniture " +
+  "or instruments, so lean to the bottom of the band for tech and the top for " +
+  "durable goods. Explain the condition deduction in one sentence of reasoning.";
 
 export function isPriceFallbackConfigured() {
   return Boolean(process.env.GEMINI_API_KEY);
