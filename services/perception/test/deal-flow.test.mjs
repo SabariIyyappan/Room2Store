@@ -152,3 +152,58 @@ test("accepting the agent's own counter is honoured, not countered again", async
   assert.equal(accepted.status, "awaiting_seller", "the agent must not renege on a price it named");
   assert.match(log.last(SELLER), /\$118/);
 });
+
+test("asking for a lower price without naming one gets a real counter", async () => {
+  await livePricedListing();
+  const log = sent();
+  await handleDealMessage({ chatId: BUYER, text: "R2S-7QK4", eventId: "e1", deps: deps(log) });
+
+  const result = await handleDealMessage({ chatId: BUYER, text: "Can I get to a lower price", eventId: "e2", deps: deps(log) });
+  assert.equal(result.status, "countered", "a haggle must not fall through to the selling script");
+  assert.doesNotMatch(log.last(BUYER), /Send a photo/);
+  assert.match(log.last(BUYER), /I can do \$\d+/);
+});
+
+test("a softened price never dips below the measured floor", async () => {
+  await livePricedListing({ price: 120, floorPrice: 118 });
+  const log = sent();
+  await handleDealMessage({ chatId: BUYER, text: "R2S-7QK4", eventId: "e1", deps: deps(log) });
+  await handleDealMessage({ chatId: BUYER, text: "too expensive", eventId: "e2", deps: deps(log) });
+
+  const offered = Number(/\$(\d+)/.exec(log.last(BUYER))[1]);
+  assert.ok(offered >= 118, `softened to ${offered}, below the floor`);
+});
+
+test("the seller can counter instead of only yes or no", async () => {
+  await livePricedListing();
+  const log = sent();
+  await handleDealMessage({ chatId: BUYER, text: "R2S-7QK4", eventId: "e1", deps: deps(log) });
+  await handleDealMessage({ chatId: BUYER, text: "yes", eventId: "e2", deps: deps(log) });
+
+  const countered = await handleDealMessage({ chatId: SELLER, text: "140", eventId: "e3", deps: deps(log) });
+  assert.equal(countered.status, "seller_countered");
+  assert.match(log.last(BUYER), /countered at \$140/);
+
+  // The seller named 140, so accepting it must not bounce back for approval.
+  const accepted = await handleDealMessage({ chatId: BUYER, text: "yes", eventId: "e4", deps: deps(log) });
+  assert.equal(accepted.status, "awaiting_pickup_details");
+  assert.match(log.last(SELLER), /pickup address and a time/);
+});
+
+test("a failed message to the other party still answers the person in front of us", async () => {
+  await livePricedListing();
+  const log = sent();
+  await handleDealMessage({ chatId: BUYER, text: "R2S-7QK4", eventId: "e1", deps: deps(log) });
+
+  const flaky = {
+    createCheckoutSession: async () => ({ id: "cs", url: "https://checkout.stripe.com/pay/cs" }),
+    send: async (chatId, text) => {
+      if (chatId === SELLER) throw new Error("Linq reply failed with status 400.");
+      log.messages.push({ chatId, text });
+    }
+  };
+
+  const result = await handleDealMessage({ chatId: BUYER, text: "yes", eventId: "e2", deps: flaky });
+  assert.equal(result.status, "awaiting_seller");
+  assert.match(log.last(BUYER), /Offer of \$145/, "the buyer must still hear back");
+});

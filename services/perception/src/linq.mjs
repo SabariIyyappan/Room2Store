@@ -257,6 +257,15 @@ export function formatSellerPaid(deal, sellerPayoutCents) {
   ].join("\n");
 }
 
+/** The seller named their own number; the buyer decides on that. */
+export function formatSellerCounter(deal, counter) {
+  return [
+    `The seller countered at $${counter} for the ${deal.listingName}.`,
+    "",
+    "Say yes to take it, or send another offer."
+  ].join("\n");
+}
+
 export function formatSellerDeclined(deal) {
   return `No problem — I told the buyer the ${deal.listingName} is not available at that price.`;
 }

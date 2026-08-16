@@ -29,6 +29,8 @@ import { isVerifiedStripeWebhook } from "./stripe.mjs";
 import { isVerifiedTeracWebhook, priceFromStudy } from "./terac.mjs";
 import { getDeal } from "./deals.mjs";
 import { handleIngestRoute, handleStudyRoute } from "./dag-routes.mjs";
+import { recordSale, totals } from "./earnings.mjs";
+import { estimatePrice } from "./price-fallback.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -162,7 +164,7 @@ async function notifyBothSidesPaid(order) {
 
   const messages = [
     { chatId: order.buyerChatId, text: formatBuyerPaid(deal), key: `paid-${order.id}-buyer` },
-    { chatId: listing?.sellerChatId, text: formatSellerPaid(deal, order.sellerPayoutCents), key: `paid-${order.id}-seller` }
+    { chatId: listing?.sellerChatId, text: formatSellerPaid(deal, order.sellerPayoutCents, order.platformFeeCents), key: `paid-${order.id}-seller` }
   ];
 
   for (const message of messages) {
@@ -214,6 +216,36 @@ async function priceListingFromStudy(listing, opportunityId) {
     }
   } catch (error) {
     console.log(JSON.stringify({ event: "terac.pricing_failed", listing: listing.id, error: error.message }));
+  }
+}
+
+/**
+ * Gives a freshly published listing a provisional price so it is immediately
+ * sellable. A real Terac study overwrites this and flips it to measured.
+ */
+async function estimateListingPrice(listing, sellerChatId) {
+  try {
+    const estimate = await estimatePrice(listing);
+    if (!estimate.ok) return;
+
+    await setMeasuredPrice(listing.id, estimate.price, { floorPrice: estimate.floorPrice, studyId: null });
+    await updateListing(listing.id, { priceStatus: "estimated" });
+    console.log(JSON.stringify({ event: "price.estimated", listing: listing.id, price: estimate.price, model: estimate.model }));
+
+    if (sellerChatId) {
+      await sendLinqReply({
+        chatId: sellerChatId,
+        text: [
+          `${listing.name} is now listed at $${estimate.price}.`,
+          "",
+          `That is an estimate, not a measured price — I will not go below $${estimate.floorPrice}.`,
+          "A pricing study will replace it with a figure measured on real people."
+        ].join("\n"),
+        idempotencyKey: `estimate-${listing.id}`
+      });
+    }
+  } catch (error) {
+    console.log(JSON.stringify({ event: "price.estimate_failed", listing: listing.id, error: error.message }));
   }
 }
 
@@ -280,7 +312,13 @@ async function handleLinqWebhook(request, response) {
 
       // Remembered so the seller can be texted when the price is measured.
       item.sellerChatId = inbound.chatId;
-      await publishListing(item);
+      const published = await publishListing(item);
+
+      // An unpriced listing cannot be bought, so fall back to a model estimate
+      // rather than leaving the seller waiting on a study that may never run.
+      // It is labelled estimated, never measured.
+      queueMicrotask(() => estimateListingPrice(published, item.sellerChatId));
+
       await sendLinqReply({
         chatId: inbound.chatId,
         text: formatListingPublished(item, { webUrl: process.env.PUBLIC_WEB_URL }),
@@ -403,6 +441,14 @@ const server = createServer(async (request, response) => {
 
       await markOrderPaid(order.id);
       await notifyBothSidesPaid(order);
+      const ledger = recordSale({
+        orderId: order.id,
+        listingName: (await findListingById(order.listingId))?.name ?? "item",
+        amountCents: order.amountCents,
+        platformFeeCents: order.platformFeeCents,
+        sellerPayoutCents: order.sellerPayoutCents
+      });
+      console.log(JSON.stringify({ event: "sale.settled", order: order.id, platformEarningsCents: ledger.platformEarningsCents }));
       return json(response, 200, { status: "paid" });
     }
 
@@ -469,6 +515,11 @@ const server = createServer(async (request, response) => {
       } catch (error) {
         return json(response, 400, { error: error.message });
       }
+    }
+
+    // What the platform has earned. Public: it is the demo's revenue counter.
+    if (request.method === "GET" && url.pathname === "/api/earnings") {
+      return json(response, 200, totals());
     }
 
     if (request.method === "GET" && url.pathname === "/health") {

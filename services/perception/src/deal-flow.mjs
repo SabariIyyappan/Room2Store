@@ -14,15 +14,32 @@ import {
   formatOfferRefused,
   formatPaymentRequest,
   formatSellerApproval,
+  formatSellerCounter,
   formatSellerDeclined,
   sendLinqReply
 } from "./linq.mjs";
 import { closeDeal, dealForBuyer, dealForSeller, isNo, isYes, startDeal, updateDeal } from "./deals.mjs";
-import { evaluateOffer, parseListingCode, parseOffer, splitPayment } from "./negotiation.mjs";
+import { evaluateOffer, parseListingCode, parseOffer, softenPrice, splitPayment, wantsLowerPrice } from "./negotiation.mjs";
 import { findListingByCode, findListingById, insertOrder } from "./store.mjs";
 import { createCheckoutSession } from "./stripe.mjs";
 
 const reply = (chatId, text, key) => sendLinqReply({ chatId, text, idempotencyKey: key });
+
+/**
+ * Sends to the *other* party. A failure here must never abort the turn: the
+ * person in front of us still deserves an answer, and losing a cross-chat
+ * notice is far better than the deal silently stalling.
+ */
+async function notify(send, chatId, text, key) {
+  if (!chatId) return false;
+  try {
+    await send(chatId, text, key);
+    return true;
+  } catch (error) {
+    console.log(JSON.stringify({ event: "deal.notify_failed", chat: chatId, error: error.message }));
+    return false;
+  }
+}
 
 /**
  * @returns {Promise<{handled: boolean, status?: string}>} handled:false means
@@ -37,7 +54,7 @@ export async function handleDealMessage({ chatId, text, eventId, deps = {} }) {
     const listing = await findListingByCode(code);
     if (!listing) return { handled: true, status: "unknown_code", sent: await send(chatId, `I could not find listing ${code}.`, eventId) };
 
-    const deal = startDeal({ listing, buyerChatId: chatId, sellerChatId: listing.sellerChatId ?? listing.sellerId });
+    const deal = startDeal({ listing, buyerChatId: chatId, sellerChatId: listing.sellerChatId ?? null });
     await send(chatId, formatItemForBuyer(listing), eventId);
     return { handled: true, status: "negotiating", dealId: deal.id };
   }
@@ -61,10 +78,36 @@ async function handleBuyerTurn({ deal, chatId, text, eventId, send, deps }) {
   // would let the agent counter above its own offer, which is bad faith and
   // leaves the buyer stuck in a loop.
   if (isYes(text) && deal.pendingCounter != null) {
-    updateDeal(deal.id, { agreedPrice: deal.pendingCounter, state: "seller_approving" });
-    if (deal.sellerChatId) await send(deal.sellerChatId, formatSellerApproval(deal, deal.pendingCounter), `${eventId}-seller`);
-    await send(chatId, `Offer of $${deal.pendingCounter} sent to the seller. I will text you as soon as they answer.`, eventId);
+    const agreed = deal.pendingCounter;
+
+    // The seller named this number, so asking them to approve it again is a
+    // pointless round trip: go straight to arranging the pickup.
+    if (deal.pendingCounterFrom === "seller") {
+      updateDeal(deal.id, { agreedPrice: agreed, state: "seller_arranging" });
+      const settled = { ...deal, agreedPrice: agreed };
+      await notify(send, deal.sellerChatId, formatAskPickupDetails(settled), `${eventId}-seller`);
+      await send(chatId, `Agreed at $${agreed}. Getting the pickup details from the seller now.`, eventId);
+      return { handled: true, status: "awaiting_pickup_details" };
+    }
+
+    updateDeal(deal.id, { agreedPrice: agreed, state: "seller_approving" });
+    await notify(send, deal.sellerChatId, formatSellerApproval(deal, agreed), `${eventId}-seller`);
+    await send(chatId, `Offer of $${agreed} sent to the seller. I will text you as soon as they answer.`, eventId);
     return { handled: true, status: "awaiting_seller" };
+  }
+
+  // "can you do better?" is a haggle, not small talk. Answering with a real
+  // number keeps the negotiation moving instead of dropping the buyer back
+  // into the selling script.
+  if (wantsLowerPrice(text)) {
+    if (listing.price == null) {
+      await send(chatId, formatCannotNegotiate(listing), eventId);
+      return { handled: true, status: "not_priced" };
+    }
+    const softened = softenPrice(deal.pendingCounter ?? listing.price, listing.floorPrice);
+    updateDeal(deal.id, { counters: deal.counters + 1, pendingCounter: softened, pendingCounterFrom: "agent" });
+    await send(chatId, formatCounterOffer(listing, softened), eventId);
+    return { handled: true, status: "countered" };
   }
 
   const offer = isYes(text) ? listing.price : parseOffer(text);
@@ -96,20 +139,39 @@ async function handleBuyerTurn({ deal, chatId, text, eventId, send, deps }) {
 
   // Accepted: the seller now has to agree before anything is arranged.
   updateDeal(deal.id, { agreedPrice: offer, state: "seller_approving" });
-  if (deal.sellerChatId) await send(deal.sellerChatId, formatSellerApproval(deal, offer), `${eventId}-seller`);
-  await send(chatId, `Offer of $${offer} sent to the seller. I will text you as soon as they answer.`, eventId);
-  return { handled: true, status: "awaiting_seller" };
+  const reached = await notify(send, deal.sellerChatId, formatSellerApproval({ ...deal, agreedPrice: offer }, offer), `${eventId}-seller`);
+  await send(
+    chatId,
+    reached
+      ? `Offer of $${offer} sent to the seller. I will text you as soon as they answer.`
+      : `Offer of $${offer} recorded. I am reaching the seller now and will text you as soon as they answer.`,
+    eventId
+  );
+  return { handled: true, status: "awaiting_seller", sellerReached: reached };
 }
 
 async function handleSellerTurn({ deal, chatId, text, eventId, send, deps }) {
   if (deal.state === "seller_approving") {
     if (isNo(text)) {
       await send(chatId, formatSellerDeclined(deal), eventId);
-      await send(deal.buyerChatId, formatBuyerDeclined(deal), `${eventId}-buyer`);
+      await notify(send, deal.buyerChatId, formatBuyerDeclined(deal), `${eventId}-buyer`);
       updateDeal(deal.id, { state: "buyer_offering", agreedPrice: null });
       return { handled: true, status: "seller_declined" };
     }
-    if (!isYes(text)) return { handled: false };
+
+    // A seller naming a number is countering, not accepting. The haggle stays
+    // open until one side actually says yes or no.
+    if (!isYes(text)) {
+      const counter = parseOffer(text);
+      if (counter == null) return { handled: false };
+
+      // Remembered so accepting it does not bounce back to the seller for
+      // approval of a number they just named themselves.
+      updateDeal(deal.id, { state: "buyer_offering", agreedPrice: null, pendingCounter: counter, pendingCounterFrom: "seller" });
+      await notify(send, deal.buyerChatId, formatSellerCounter(deal, counter), `${eventId}-buyer`);
+      await send(chatId, `Told the buyer $${counter}. I will let you know what they say.`, eventId);
+      return { handled: true, status: "seller_countered" };
+    }
 
     updateDeal(deal.id, { state: "seller_arranging" });
     await send(chatId, formatAskPickupDetails(deal), eventId);
@@ -133,7 +195,7 @@ async function handleSellerTurn({ deal, chatId, text, eventId, send, deps }) {
     return { handled: true, status: "payment_link_failed", error: payment.error };
   }
 
-  await send(deal.buyerChatId, formatPaymentRequest(deal, payment.url), `${eventId}-buyer`);
+  await notify(send, deal.buyerChatId, formatPaymentRequest(deal, payment.url), `${eventId}-buyer`);
   await send(chatId, "Sent to the buyer for payment. I will text you the moment it clears.", eventId);
   return { handled: true, status: "awaiting_payment", orderId: payment.orderId };
 }

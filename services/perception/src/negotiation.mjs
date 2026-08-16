@@ -58,6 +58,24 @@ export function parseOffer(text) {
   return dollars + cents;
 }
 
+/** "can you do better", "too expensive", "lower?" — a haggle with no number in it. */
+const WANTS_LOWER = /\b(lower|cheaper|less|discount|best price|too (much|expensive|high)|come down|any better|deal)\b/i;
+
+export function wantsLowerPrice(text) {
+  const value = String(text ?? "");
+  return WANTS_LOWER.test(value) && OFFER_PATTERN.exec(value) === null;
+}
+
+/**
+ * A small good-faith reduction when the buyer asks for a discount without
+ * naming a figure. Never goes below the measured floor.
+ */
+export function softenPrice(price, floorPrice) {
+  const reduced = Math.ceil(Number(price) * 0.92);
+  const floor = Number.isFinite(Number(floorPrice)) ? Number(floorPrice) : reduced;
+  return Math.max(floor, Math.min(Number(price), reduced));
+}
+
 /** Listing codes are typed by hand, so accept them in any case and spacing. */
 export function parseListingCode(text) {
   const match = /\bR2S[\s-]?([A-Z0-9]{4})\b/i.exec(String(text ?? ""));
