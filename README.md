@@ -9,134 +9,109 @@ the payment — 90% to the seller, 10% to the platform.
 
 ---
 
-## The seller's journey
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor S as Seller
-    participant L as Linq (iMessage)
-    participant P as Perception service
-    participant G as Gemini vision
-    participant C as Compliance
-    participant DB as Postgres
-
-    S->>L: photo of an item
-    L->>P: signed message.received webhook
-    P-->>L: "Got it — looking at your photo now."
-    Note over P: webhook answered before the slow call,<br/>so Linq never times out and redelivers
-    P->>G: identify the product
-    G-->>P: name, brand, model number, confidence
-    P-->>S: "Looks like a used QSC PA speaker.<br/>What condition is it in?"
-    S->>P: "fair"
-    P-->>S: "What ZIP code is it in for pickup?"
-    S->>P: "95134"
-    P->>C: prohibited? excluded? unsafe?
-    alt vetoed
-        C-->>P: veto
-        P-->>S: "I cannot list this, and why"
-    else approved
-        P->>DB: publish listing, mint code R2S-XXXX
-        P-->>S: "Your listing is live" + price
-    end
-```
-
-## The buyer's journey
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor B as Buyer
-    participant P as Perception service
-    actor S as Seller
-    participant ST as Stripe
-
-    B->>P: "R2S-GNVD" (from the storefront button)
-    P-->>B: item, condition, asking price
-    B->>P: "would you take 110?"
-    Note over P: offer checked against the measured floor
-    P-->>B: "The lowest I can go is $118."
-    B->>P: "yes"
-    P-->>S: "You have a buyer — $118"
-    alt seller counters
-        S->>P: "130"
-        P-->>B: "The seller countered at $130"
-    else seller accepts
-        S->>P: "YES"
-        P-->>S: "Send the pickup address and a time"
-        S->>P: "500 Howard St, tomorrow 6pm"
-        P->>ST: create Checkout Session
-        ST-->>P: payment link
-        P-->>B: pickup details + pay here
-        B->>ST: pays
-        ST->>P: checkout.session.completed (signed)
-        P-->>B: "Paid — it is yours"
-        P-->>S: "Sold. You receive 90%: $106.20"
-    end
-```
-
-## How pricing works
-
-The product's claim is that a price is **measured on people, not guessed**.
-Both paths exist, and they are never labelled the same way.
+## How it works
 
 ```mermaid
 flowchart LR
-    A[New listing] --> B{Terac study<br/>linked?}
-    B -->|no| C[Gemini estimate<br/>from retail x condition]
-    C --> D["priceStatus: estimated<br/>'a market estimate,<br/>not measured on a panel yet'"]
-    B -->|yes| E[Fetch approved<br/>panel submissions]
-    E --> F{n >= 5?}
-    F -->|no| G[Refuse to price<br/>rather than fake confidence]
-    F -->|yes| H[Fit demand curve]
-    H --> I["price = argmax(price x P buy)<br/>floor = highest price 75% still pay"]
-    I --> J["priceStatus: measured<br/>'measured on 52 people'"]
-    D --> K[Listing is sellable]
-    J --> K
+    S["📱 Seller<br/>texts a photo"]
+
+    subgraph AGENT ["🤖 The agent"]
+        direction TB
+        ID["👁️ Identify<br/>what is it?"]
+        PR["💰 Price<br/>what is it worth?"]
+        CK["🛡️ Check<br/>safe to sell?"]
+        ID --> PR --> CK
+    end
+
+    ST["🏪 Storefront<br/>live, filtered by distance"]
+    B["🙋 Buyer<br/>texts the item code"]
+    NG["🤝 Negotiate<br/>holds the floor price"]
+    PAY["💳 Pay<br/>Stripe checkout"]
+    SPLIT["🎉 Sold<br/>90% seller · 10% platform"]
+
+    S --> AGENT --> ST --> B --> NG --> PAY --> SPLIT
+    SPLIT -.->|"both texted"| S
+
+    classDef person fill:#EEF2FF,stroke:#6366F1,stroke-width:2px,color:#1E1B4B
+    classDef agent fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#2E1065
+    classDef money fill:#ECFDF5,stroke:#10B981,stroke-width:2px,color:#064E3B
+    classDef shop fill:#FFF7ED,stroke:#F97316,stroke-width:2px,color:#7C2D12
+
+    class S,B person
+    class ID,PR,CK agent
+    class PAY,SPLIT money
+    class ST,NG shop
 ```
 
-Condition drives the estimate against retail: new 70–85%, excellent 55–70%,
-good 40–55%, fair 25–40%. Tech leans to the bottom of its band, durable goods
-to the top. The same speaker prices at $759 new and $310 fair.
+Everything happens over iMessage. The seller never opens an app; the buyer only
+opens the storefront to browse.
 
-## System
+## What each piece runs on
 
 ```mermaid
 flowchart TB
-    subgraph Buyers & sellers
-        IM[iMessage / RCS]
-        WEB[Storefront<br/>React + Vite]
+    subgraph EDGE ["👥 People"]
+        IM["💬 iMessage<br/>Linq"]
+        WEB["🖥️ Storefront<br/>React"]
     end
 
-    subgraph Room2Store
-        PERC[Perception service<br/>Node, no framework]
-        COMP[Compliance<br/>veto gate]
-        ORCH[Orchestrator<br/>Band rooms + gate engine]
-        DAG[Workflows DAG]
+    subgraph CORE ["⚙️ Room2Store"]
+        API["🧠 Perception service<br/>the brain: chat, listings, deals"]
+        DB[("🗄️ Postgres<br/>listings, orders, sellers")]
+        API <--> DB
     end
 
-    subgraph External
-        LINQ[Linq API]
-        GEM[Gemini]
-        TER[Terac panel]
-        STR[Stripe]
-        PG[(Postgres)]
+    subgraph AI ["✨ Intelligence"]
+        GEM["🔮 Gemini<br/>identify + estimate"]
+        TER["📊 Terac<br/>price measured on people"]
     end
 
-    IM <--> LINQ <--> PERC
-    WEB -->|GET /api/listings| PERC
-    PERC --> GEM
-    PERC --> COMP
-    PERC <--> PG
-    TER -->|submission.approved| PERC
-    STR -->|checkout.session.completed| PERC
-    PERC --> STR
-    DAG -->|POST /ingest, /study| PERC
-    ORCH --- DAG
+    MONEY["💳 Stripe<br/>checkout + settlement"]
+
+    IM <--> API
+    WEB --> API
+    API <--> AI
+    API <--> MONEY
+
+    classDef people fill:#EEF2FF,stroke:#6366F1,stroke-width:2px,color:#1E1B4B
+    classDef core fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#2E1065
+    classDef ai fill:#FDF4FF,stroke:#D946EF,stroke-width:2px,color:#4A044E
+    classDef cash fill:#ECFDF5,stroke:#10B981,stroke-width:2px,color:#064E3B
+
+    class IM,WEB people
+    class API,DB core
+    class GEM,TER ai
+    class MONEY cash
 ```
 
-Every inbound webhook is signature-verified and fails closed: Linq, Terac and
-Stripe all reject an unsigned or replayed request with 401.
+## The one idea that matters
+
+A price is either **measured on real people** or it is a **guess** — and the
+product never confuses the two.
+
+```mermaid
+flowchart LR
+    N["🆕 New listing"] --> Q{"📊 Panel<br/>study run?"}
+    Q -->|"no"| E["🔮 Gemini estimate<br/>retail × condition"]
+    Q -->|"yes, 5+ people"| M["📈 Demand curve<br/>price × probability"]
+    Q -->|"fewer than 5"| R["🚫 No price<br/>refuses to fake it"]
+
+    E --> TAG1["🏷️ estimate"]
+    M --> TAG2["✅ measured"]
+
+    classDef guess fill:#FFF7ED,stroke:#F97316,stroke-width:2px,color:#7C2D12
+    classDef real fill:#ECFDF5,stroke:#10B981,stroke-width:2px,color:#064E3B
+    classDef stop fill:#FEF2F2,stroke:#EF4444,stroke-width:2px,color:#7F1D1D
+    classDef neutral fill:#F8FAFC,stroke:#64748B,stroke-width:2px,color:#0F172A
+
+    class E,TAG1 guess
+    class M,TAG2 real
+    class R stop
+    class N,Q neutral
+```
+
+Condition sets the discount off retail — new 70–85%, excellent 55–70%,
+good 40–55%, fair 25–40%. The same speaker is $759 new and $310 fair.
 
 ## Services
 
