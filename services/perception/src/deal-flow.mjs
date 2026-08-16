@@ -57,8 +57,17 @@ async function handleBuyerTurn({ deal, chatId, text, eventId, send, deps }) {
   const listing = await findListingById(deal.listingId);
   if (!listing) return { handled: true, status: "listing_gone" };
 
-  // "yes" means the asking price, or the counter already on the table.
-  const offer = isYes(text) ? (deal.pendingCounter ?? listing.price) : parseOffer(text);
+  // Accepting a number the agent itself named is a done deal. Re-evaluating it
+  // would let the agent counter above its own offer, which is bad faith and
+  // leaves the buyer stuck in a loop.
+  if (isYes(text) && deal.pendingCounter != null) {
+    updateDeal(deal.id, { agreedPrice: deal.pendingCounter, state: "seller_approving" });
+    if (deal.sellerChatId) await send(deal.sellerChatId, formatSellerApproval(deal, deal.pendingCounter), `${eventId}-seller`);
+    await send(chatId, `Offer of $${deal.pendingCounter} sent to the seller. I will text you as soon as they answer.`, eventId);
+    return { handled: true, status: "awaiting_seller" };
+  }
+
+  const offer = isYes(text) ? listing.price : parseOffer(text);
   if (offer == null) return { handled: false };
 
   const result = evaluateOffer({

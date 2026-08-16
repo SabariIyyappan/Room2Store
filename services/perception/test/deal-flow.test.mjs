@@ -137,3 +137,18 @@ test("a message from someone with no deal is left to the selling path", async ()
   const result = await handleDealMessage({ chatId: "chat-stranger", text: "hello", eventId: "e1", deps: deps(log) });
   assert.equal(result.handled, false);
 });
+
+test("accepting the agent's own counter is honoured, not countered again", async () => {
+  await livePricedListing();
+  const log = sent();
+  await handleDealMessage({ chatId: BUYER, text: "R2S-7QK4", eventId: "e1", deps: deps(log) });
+
+  // The agent names the floor after a lowball...
+  await handleDealMessage({ chatId: BUYER, text: "would you take 40?", eventId: "e2", deps: deps(log) });
+  assert.match(log.last(BUYER), /lowest I can go is \$118/);
+
+  // ...so saying yes to it must close at that number, not reopen the haggle.
+  const accepted = await handleDealMessage({ chatId: BUYER, text: "yes", eventId: "e3", deps: deps(log) });
+  assert.equal(accepted.status, "awaiting_seller", "the agent must not renege on a price it named");
+  assert.match(log.last(SELLER), /\$118/);
+});
