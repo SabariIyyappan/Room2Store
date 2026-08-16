@@ -380,6 +380,28 @@ const server = createServer(async (request, response) => {
     }
 
     /**
+     * Re-runs the price estimate for a listing. Needed when the estimate failed
+     * or the listing predates it, so nothing is stranded as unpriced.
+     */
+    const estimateLink = url.pathname.match(/^\/api\/listings\/([^/]+)\/estimate$/);
+    if (request.method === "POST" && estimateLink) {
+      const expected = process.env.PRICING_ADMIN_TOKEN;
+      if (expected && request.headers["x-pricing-token"] !== expected) {
+        return json(response, 401, { error: "Invalid pricing token." });
+      }
+
+      const listing = await findListingById(estimateLink[1]);
+      if (!listing) return json(response, 404, { error: "No listing with that id." });
+
+      const estimate = await estimatePrice(listing);
+      if (!estimate.ok) return json(response, 502, { error: "Could not estimate a price.", reason: estimate.reason });
+
+      const priced = await setMeasuredPrice(listing.id, estimate.price, { floorPrice: estimate.floorPrice, studyId: null });
+      await updateListing(listing.id, { priceStatus: "estimated" });
+      return json(response, 200, { listing: priced, retailPrice: estimate.retailPrice, reasoning: estimate.reasoning });
+    }
+
+    /**
      * Links a Terac study to a listing, so the webhook knows which item the
      * answers priced. Shared-token protected like the manual price endpoint.
      */
