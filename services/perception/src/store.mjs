@@ -1,10 +1,10 @@
 /**
  * Persistence for sellers, listings, offers and orders.
  *
- * Backed by Postgres when DATABASE_URL is set, and by memory when it is not, so
- * the service runs locally and in tests with no database. The in-memory backend
- * is a development convenience: it dies with the process and must never be what
- * a real sale depends on.
+ * Postgres is required in production: an in-memory store silently loses a sale
+ * on restart, and a marketplace that forgets an order is worse than one that
+ * refuses to start. The memory backend remains only for tests, and is selected
+ * by ALLOW_MEMORY_STORE rather than by DATABASE_URL happening to be absent.
  */
 
 import { randomUUID } from "node:crypto";
@@ -94,6 +94,10 @@ CREATE INDEX IF NOT EXISTS listings_code_idx ON listings(code);
 /** Connects to Postgres when configured. Safe to call more than once. */
 export async function initStore() {
   if (!process.env.DATABASE_URL) {
+    // Falling back to memory here once cost a deploy its listings silently.
+    if (process.env.ALLOW_MEMORY_STORE !== "true" && process.env.NODE_ENV === "production") {
+      throw new Error("DATABASE_URL is required. Set ALLOW_MEMORY_STORE=true only for tests.");
+    }
     backend = "memory";
     return { backend };
   }

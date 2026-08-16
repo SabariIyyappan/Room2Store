@@ -27,10 +27,10 @@ import { handleDealMessage } from "./deal-flow.mjs";
 import { initStore, markOrderPaid, findOrderById, findListingById, findListingByStudy, updateListing, storeBackend } from "./store.mjs";
 import { isVerifiedStripeWebhook } from "./stripe.mjs";
 import { isVerifiedTeracWebhook, priceFromStudy } from "./terac.mjs";
+import { createStudy, getStudy, launchStudy } from "./terac-study.mjs";
 import { getDeal } from "./deals.mjs";
 import { handleIngestRoute, handleStudyRoute } from "./dag-routes.mjs";
 import { recordSale, totals } from "./earnings.mjs";
-import { estimatePrice } from "./price-fallback.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -219,36 +219,6 @@ async function priceListingFromStudy(listing, opportunityId) {
   }
 }
 
-/**
- * Gives a freshly published listing a provisional price so it is immediately
- * sellable. A real Terac study overwrites this and flips it to measured.
- */
-async function estimateListingPrice(listing, sellerChatId) {
-  try {
-    const estimate = await estimatePrice(listing);
-    if (!estimate.ok) return;
-
-    await setMeasuredPrice(listing.id, estimate.price, { floorPrice: estimate.floorPrice, studyId: null });
-    await updateListing(listing.id, { priceStatus: "estimated" });
-    console.log(JSON.stringify({ event: "price.estimated", listing: listing.id, price: estimate.price, model: estimate.model }));
-
-    if (sellerChatId) {
-      await sendLinqReply({
-        chatId: sellerChatId,
-        text: [
-          `${listing.name} is now listed at $${estimate.price}.`,
-          "",
-          `That is an estimate, not a measured price — I will not go below $${estimate.floorPrice}.`,
-          "A pricing study will replace it with a figure measured on real people."
-        ].join("\n"),
-        idempotencyKey: `estimate-${listing.id}`
-      });
-    }
-  } catch (error) {
-    console.log(JSON.stringify({ event: "price.estimate_failed", listing: listing.id, error: error.message }));
-  }
-}
-
 async function handleLinqWebhook(request, response) {
   const rawBody = await readRawBody(request);
   if (!isVerifiedLinqWebhook(request, rawBody)) return json(response, 401, { error: "Invalid Linq webhook signature." });
@@ -312,12 +282,7 @@ async function handleLinqWebhook(request, response) {
 
       // Remembered so the seller can be texted when the price is measured.
       item.sellerChatId = inbound.chatId;
-      const published = await publishListing(item);
-
-      // An unpriced listing cannot be bought, so fall back to a model estimate
-      // rather than leaving the seller waiting on a study that may never run.
-      // It is labelled estimated, never measured.
-      queueMicrotask(() => estimateListingPrice(published, item.sellerChatId));
+      await publishListing(item);
 
       await sendLinqReply({
         chatId: inbound.chatId,
@@ -380,25 +345,49 @@ const server = createServer(async (request, response) => {
     }
 
     /**
-     * Re-runs the price estimate for a listing. Needed when the estimate failed
-     * or the listing predates it, so nothing is stranded as unpriced.
+     * Commissions a real pricing study for a listing.
+     *
+     * Creating a draft is free; launching it puts the study in front of real
+     * people and is billed per participant, so launching requires an explicit
+     * `launch: true` rather than happening as a side effect.
      */
-    const estimateLink = url.pathname.match(/^\/api\/listings\/([^/]+)\/estimate$/);
-    if (request.method === "POST" && estimateLink) {
+    const studyRoute = url.pathname.match(/^\/api\/listings\/([^/]+)\/study\/launch$/);
+    if (request.method === "POST" && studyRoute) {
       const expected = process.env.PRICING_ADMIN_TOKEN;
-      if (expected && request.headers["x-pricing-token"] !== expected) {
-        return json(response, 401, { error: "Invalid pricing token." });
-      }
+      if (!expected) return json(response, 503, { error: "PRICING_ADMIN_TOKEN is not configured." });
+      if (request.headers["x-pricing-token"] !== expected) return json(response, 401, { error: "Invalid pricing token." });
 
-      const listing = await findListingById(estimateLink[1]);
+      const listing = await findListingById(studyRoute[1]);
       if (!listing) return json(response, 404, { error: "No listing with that id." });
 
-      const estimate = await estimatePrice(listing);
-      if (!estimate.ok) return json(response, 502, { error: "Could not estimate a price.", reason: estimate.reason });
+      const body = await readJson(request);
+      try {
+        const draft = await createStudy(listing, { participants: Number(body.participants) || undefined });
+        await updateListing(listing.id, { studyId: draft.id });
 
-      const priced = await setMeasuredPrice(listing.id, estimate.price, { floorPrice: estimate.floorPrice, studyId: null });
-      await updateListing(listing.id, { priceStatus: "estimated" });
-      return json(response, 200, { listing: priced, retailPrice: estimate.retailPrice, reasoning: estimate.reasoning });
+        if (body.launch !== true) {
+          return json(response, 200, {
+            status: "draft",
+            study: draft,
+            note: "Draft only. POST again with launch:true to put it in front of real people, which is billed."
+          });
+        }
+
+        const launched = await launchStudy(draft.id);
+        return json(response, 200, { status: "launched", study: { ...draft, ...launched } });
+      } catch (error) {
+        return json(response, 502, { error: error.message });
+      }
+    }
+
+    // How a commissioned study is progressing.
+    const studyStatus = url.pathname.match(/^\/api\/studies\/([^/]+)$/);
+    if (request.method === "GET" && studyStatus) {
+      try {
+        return json(response, 200, await getStudy(studyStatus[1]));
+      } catch (error) {
+        return json(response, 502, { error: error.message });
+      }
     }
 
     /**
