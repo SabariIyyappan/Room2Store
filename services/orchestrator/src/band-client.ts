@@ -103,7 +103,9 @@ export class BandApiClient implements BandClient {
   }
 
   async createRoom(): Promise<BandRoom> {
-    const payload = unwrapData(await this.request("/chats", { method: "POST", body: JSON.stringify({}) }));
+    // The live API rejects an empty body with 422 "Missing field: chat"; the
+    // in-memory double never did, which is why this was not caught earlier.
+    const payload = unwrapData(await this.request("/chats", { method: "POST", body: JSON.stringify({ chat: {} }) }));
     if (!isRecord(payload)) throw new Error("Band returned an invalid chat room");
     const id = getString(payload, "id", "chat_id");
     if (!id) throw new Error("Band returned a chat room without an id");

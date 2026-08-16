@@ -28,6 +28,7 @@ import { initStore, markOrderPaid, findOrderById, findListingById, findListingBy
 import { isVerifiedStripeWebhook } from "./stripe.mjs";
 import { isVerifiedTeracWebhook, priceFromStudy } from "./terac.mjs";
 import { getDeal } from "./deals.mjs";
+import { handleIngestRoute, handleStudyRoute } from "./dag-routes.mjs";
 
 const directory = fileURLToPath(new URL("..", import.meta.url));
 const publicDirectory = join(directory, "public");
@@ -441,6 +442,19 @@ const server = createServer(async (request, response) => {
       }
 
       return json(response, 200, { listing });
+    }
+
+    // The Workflows DAG's sockets. Same shared token as the pricing endpoint:
+    // /study spends Terac panel budget, so it is not left open.
+    if (request.method === "POST" && (url.pathname === "/study" || url.pathname === "/ingest")) {
+      const expected = process.env.PRICING_ADMIN_TOKEN;
+      if (expected && request.headers["x-pricing-token"] !== expected) {
+        return json(response, 401, { error: "Invalid pricing token." });
+      }
+
+      const body = await readJson(request);
+      const result = url.pathname === "/study" ? await handleStudyRoute(body) : await handleIngestRoute(body);
+      return json(response, result.status, result.body);
     }
 
     // Buyer-facing listing search. No auth: these are public listings.
