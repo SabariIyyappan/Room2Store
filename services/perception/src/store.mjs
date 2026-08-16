@@ -197,10 +197,10 @@ function rowToListing(row) {
 }
 
 const LISTING_COLUMNS = `
-  id, code, seller_id AS "sellerId", name, category, model_number AS "modelNumber",
+  listings.id, code, seller_id AS "sellerId", name, category, model_number AS "modelNumber",
   condition, photo_url AS "photoUrl", price, floor_price AS "floorPrice",
-  price_status AS "priceStatus", study_id AS "studyId", status,
-  seller_chat_id AS "sellerChatId", published_at AS "publishedAt",
+  price_status AS "priceStatus", study_id AS "studyId", listings.status,
+  COALESCE(listings.seller_chat_id, sellers.chat_id) AS "sellerChatId", published_at AS "publishedAt",
   pickup_zip AS "pickupZip", pickup_city AS "pickupCity", pickup_state AS "pickupState",
   pickup_latitude AS "pickupLatitude", pickup_longitude AS "pickupLongitude"
 `;
@@ -209,22 +209,25 @@ export async function listLiveListings() {
   if (backend === "memory") {
     return [...memory.listings.values()].filter((listing) => listing.status === "live");
   }
-  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings WHERE status = 'live'`);
+  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings LEFT JOIN sellers ON sellers.id = listings.seller_id WHERE status = 'live'`);
   return rows.map(rowToListing);
 }
 
 export async function findListingById(id) {
   if (backend === "memory") return memory.listings.get(id) ?? null;
-  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings WHERE id = $1`, [id]);
+  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings LEFT JOIN sellers ON sellers.id = listings.seller_id WHERE listings.id = $1`, [id]);
   return rows[0] ? rowToListing(rows[0]) : null;
 }
 
 export async function findListingByCode(code) {
   const normalized = String(code ?? "").toUpperCase();
   if (backend === "memory") {
-    return [...memory.listings.values()].find((listing) => listing.code === normalized) ?? null;
+    const found = [...memory.listings.values()].find((listing) => listing.code === normalized);
+    if (!found) return null;
+    if (!found.sellerChatId) found.sellerChatId = memory.sellers.get(found.sellerId)?.chatId ?? null;
+    return found;
   }
-  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings WHERE code = $1`, [normalized]);
+  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings LEFT JOIN sellers ON sellers.id = listings.seller_id WHERE code = $1`, [normalized]);
   return rows[0] ? rowToListing(rows[0]) : null;
 }
 
@@ -233,7 +236,7 @@ export async function findListingByStudy(studyId) {
   if (backend === "memory") {
     return [...memory.listings.values()].find((listing) => listing.studyId === studyId) ?? null;
   }
-  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings WHERE study_id = $1 LIMIT 1`, [studyId]);
+  const { rows } = await pool.query(`SELECT ${LISTING_COLUMNS} FROM listings LEFT JOIN sellers ON sellers.id = listings.seller_id WHERE study_id = $1 LIMIT 1`, [studyId]);
   return rows[0] ? rowToListing(rows[0]) : null;
 }
 

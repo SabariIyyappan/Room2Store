@@ -303,17 +303,23 @@ export function formatListingVetoed(item, verdict) {
 
 /** Sent to the seller once the pricing study has measured a real number. */
 export function formatPriceMeasured(listing) {
-  const panel = listing.sampleSize ? `${listing.sampleSize} people` : "real people";
-  const lines = [
-    `Your price is in — measured on ${panel}, not guessed.`,
+  // Only a real panel earns the word "measured". A price set by hand or
+  // estimated by a model says so, because that claim is the whole pitch.
+  const measured = Boolean(listing.sampleSize) && listing.priceStatus !== "estimated";
+  const lines = measured
+    ? [`Your price is in — measured on ${listing.sampleSize} people, not guessed.`]
+    : ["Your price is set.", "", "This is a market estimate, not measured on a panel yet."];
+
+  lines.push(
     "",
     listing.name,
     `Price: $${listing.price}`
-  ];
+  );
   if (listing.floorPrice) lines.push(`I will not accept below $${listing.floorPrice}.`);
   lines.push("", "It is live on Room2Store now.");
   return lines.join("\n");
 }
+
 
 /** Sent when the ZIP could not be resolved. */
 export function formatLocationRejected(zip) {
