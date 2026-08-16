@@ -11,6 +11,7 @@ import {
   formatCannotNegotiate,
   formatCounterOffer,
   formatItemForBuyer,
+  formatNegotiationHelp,
   formatOfferRefused,
   formatPaymentRequest,
   formatSellerApproval,
@@ -18,7 +19,7 @@ import {
   formatSellerDeclined,
   sendLinqReply
 } from "./linq.mjs";
-import { closeDeal, dealForBuyer, dealForSeller, isNo, isYes, startDeal, updateDeal } from "./deals.mjs";
+import { closeDeal, dealForBuyer, dealForSeller, isNo, isOptOut, isYes, startDeal, updateDeal } from "./deals.mjs";
 import { evaluateOffer, parseListingCode, parseOffer, softenPrice, splitPayment, wantsLowerPrice } from "./negotiation.mjs";
 import { findListingByCode, findListingById, insertOrder } from "./store.mjs";
 import { createCheckoutSession } from "./stripe.mjs";
@@ -48,11 +49,22 @@ async function notify(send, chatId, text, key) {
 export async function handleDealMessage({ chatId, text, eventId, deps = {} }) {
   const send = deps.send ?? reply;
 
+  // An opt-out outranks any negotiation. The webhook checks this first, but a
+  // legal requirement must not depend on the order two functions are called in.
+  if (isOptOut(text)) return { handled: false, status: "opted_out" };
+
   // A buyer naming a listing code starts a negotiation, even mid-conversation.
   const code = parseListingCode(text);
   if (code) {
     const listing = await findListingByCode(code);
     if (!listing) return { handled: true, status: "unknown_code", sent: await send(chatId, `I could not find listing ${code}.`, eventId) };
+
+    // A sold or withdrawn item must not be negotiable: two buyers agreeing on
+    // the same item is the one failure that costs someone real money.
+    if (listing.status !== "live") {
+      await send(chatId, `The ${listing.name} is no longer available — it is ${listing.status}.`, eventId);
+      return { handled: true, status: "not_available" };
+    }
 
     const deal = startDeal({ listing, buyerChatId: chatId, sellerChatId: listing.sellerChatId ?? null });
     await send(chatId, formatItemForBuyer(listing), eventId);
@@ -110,8 +122,20 @@ async function handleBuyerTurn({ deal, chatId, text, eventId, send, deps }) {
     return { handled: true, status: "countered" };
   }
 
+  // An unpriced item cannot be agreed to at any number, so say so rather than
+  // dropping the buyer back into the selling script.
+  if (isYes(text) && listing.price == null) {
+    await send(chatId, formatCannotNegotiate(listing), eventId);
+    return { handled: true, status: "not_priced" };
+  }
+
   const offer = isYes(text) ? listing.price : parseOffer(text);
-  if (offer == null) return { handled: false };
+  if (offer == null) {
+    // Mid-negotiation, anything unrecognised is still about this item. Falling
+    // through here told buyers to "send a photo", which made no sense to them.
+    await send(chatId, formatNegotiationHelp(listing), eventId);
+    return { handled: true, status: "reprompted" };
+  }
 
   const result = evaluateOffer({
     offer,

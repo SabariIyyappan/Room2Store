@@ -202,6 +202,17 @@ export function formatOfferRefused(listing, floorPrice) {
   ].join("\n");
 }
 
+/** Keeps a buyer inside the negotiation instead of dropping them into the selling script. */
+export function formatNegotiationHelp(listing) {
+  const lines = [`Still talking about the ${listing.name}.`, ""];
+  lines.push(
+    listing.price == null
+      ? "It is not priced yet, so I cannot make a deal on it."
+      : `Asking $${listing.price}. Send an offer as a number, or say yes to take it.`
+  );
+  return lines.join("\n");
+}
+
 export function formatCannotNegotiate(listing) {
   return `The ${listing.name} has not been priced yet, so I cannot make a deal on it.\n\nI will text you as soon as it has a price.`;
 }

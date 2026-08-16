@@ -33,7 +33,10 @@ export function startDeal({ listing, buyerChatId, sellerChatId }) {
 
   deals.set(deal.id, deal);
   byBuyerChat.set(buyerChatId, deal.id);
-  if (sellerChatId) bySellerChat.set(sellerChatId, deal.id);
+  if (sellerChatId) {
+    const queued = bySellerChat.get(sellerChatId) ?? [];
+    bySellerChat.set(sellerChatId, [...queued, deal.id]);
+  }
   return deal;
 }
 
@@ -42,11 +45,25 @@ export function dealForBuyer(chatId) {
   return id ? deals.get(id) ?? null : null;
 }
 
+/**
+ * The oldest deal actually waiting on this seller. Answering in arrival order
+ * matches what the seller was asked first, and means no buyer is orphaned when
+ * a second offer lands before the first is answered.
+ */
 export function dealForSeller(chatId) {
-  const id = bySellerChat.get(chatId);
-  const deal = id ? deals.get(id) ?? null : null;
-  // A seller only has a pending question while the deal is waiting on them.
-  return deal && (deal.state === "seller_approving" || deal.state === "seller_arranging") ? deal : null;
+  const queued = bySellerChat.get(chatId) ?? [];
+  for (const id of queued) {
+    const deal = deals.get(id);
+    if (deal && (deal.state === "seller_approving" || deal.state === "seller_arranging")) return deal;
+  }
+  return null;
+}
+
+/** Deals waiting on this seller behind the one being answered. */
+export function pendingForSeller(chatId) {
+  return (bySellerChat.get(chatId) ?? [])
+    .map((id) => deals.get(id))
+    .filter((deal) => deal && deal.state === "seller_approving");
 }
 
 export function getDeal(id) {
@@ -65,7 +82,11 @@ export function closeDeal(id) {
   const deal = deals.get(id);
   if (!deal) return null;
   byBuyerChat.delete(deal.buyerChatId);
-  if (deal.sellerChatId) bySellerChat.delete(deal.sellerChatId);
+  if (deal.sellerChatId) {
+    const queued = (bySellerChat.get(deal.sellerChatId) ?? []).filter((queuedId) => queuedId !== id);
+    if (queued.length > 0) bySellerChat.set(deal.sellerChatId, queued);
+    else bySellerChat.delete(deal.sellerChatId);
+  }
   return deal;
 }
 
@@ -80,6 +101,20 @@ const NO = /^(no|nope|n|decline|reject|cancel)\b/i;
 
 export function isYes(text) {
   return YES.test(String(text ?? "").trim());
+}
+
+const OPT_OUT_WORDS = ["stop", "unsubscribe", "optout", "cancel", "end", "quit"];
+
+/**
+ * Mirrors the webhook's opt-out check, so neither path can swallow a STOP.
+ *
+ * A word list rather than a regex literal: the previous version had an
+ * invisible control character where its word boundary belonged, so it silently
+ * matched nothing and every opt-out fell through.
+ */
+export function isOptOut(text) {
+  const first = String(text ?? "").trim().toLowerCase().split(/\s+/)[0];
+  return OPT_OUT_WORDS.includes(first);
 }
 
 export function isNo(text) {
