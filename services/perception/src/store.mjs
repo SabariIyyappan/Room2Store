@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE INDEX IF NOT EXISTS listings_status_idx ON listings(status);
 `;
 
+/**
+ * Columns added after the first deploy. CREATE TABLE IF NOT EXISTS silently
+ * skips an existing table, so new columns need adding explicitly or the first
+ * query after a schema change fails in production.
+ */
+const MIGRATIONS = `
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS seller_chat_id TEXT;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS study_id TEXT;
+CREATE INDEX IF NOT EXISTS listings_study_idx ON listings(study_id);
+CREATE INDEX IF NOT EXISTS listings_code_idx ON listings(code);
+`;
+
 /** Connects to Postgres when configured. Safe to call more than once. */
 export async function initStore() {
   if (!process.env.DATABASE_URL) {
@@ -96,6 +108,7 @@ export async function initStore() {
   });
 
   await pool.query(SCHEMA);
+  await pool.query(MIGRATIONS);
   backend = "postgres";
   return { backend };
 }
